@@ -32,7 +32,7 @@ def pdf_to_images(pdf_path: str, output_dir: str) -> List[str]:
         if img.width > img.height:
             img = img.rotate(90, expand=True)
 
-        filename = output_dir / f"page{page_number}.png"
+        filename = output_dir / f"_page{page_number}.png"
         img.save(filename)
         image_paths.append(str(filename))
 

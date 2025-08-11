@@ -241,7 +241,7 @@ def recognize_page_with_orientation(img_path, template_db):
 # --------------------
 def template_detection_main(test_dir, out_dir):
     results_file = os.path.join(out_dir, "template_detection_results.txt")
-
+    
     print("[INFO] Building template database...")
     template_db = build_template_db()
     with open(results_file, "w", encoding="utf-8") as f:
