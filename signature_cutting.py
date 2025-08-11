@@ -98,10 +98,10 @@ def process_folder_by_type_prefix(
 
 
 # -------- Example direct run --------
-if __name__ == "__main__":
-    config_path = "./config.toml"
-    process_folder_by_type_prefix(
-        input_dir="./output_assets",
-        output_dir="./out/signature",
-        config_path=config_path,
-    )
+# if __name__ == "__main__":
+#     config_path = "./config.toml"
+#     process_folder_by_type_prefix(
+#         input_dir="./output_assets",
+#         output_dir="./out/signature",
+#         config_path=config_path,
+#     )
