@@ -1,6 +1,5 @@
 from glob import glob
 import os
-import cv2 as cv
 
 from input_pipeline import pdf_to_images
 from template_detection import extract_features, get_header_footer, preprocess

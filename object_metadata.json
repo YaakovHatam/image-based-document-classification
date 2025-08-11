@@ -1,0 +1,45 @@
+{
+    "filename": "customer1.pdf",
+    "pages": [
+        {
+            "file_page_number": 1,
+            "form_type": "1301",
+            "source_form_page": 1,
+            "roate": 90,
+            "confidence_first": 1.00,
+            "confidence_second": 0.3
+        },
+        {
+            "file_page_number": 2,
+            "form_type": "1301",
+            "source_form_page": 2,
+            "roate": 0,
+            "confidence_first": 1.00,
+            "confidence_second": 0.32
+        },
+        {
+            "file_page_number": 3,
+            "form_type": "1301",
+            "source_form_page": 3,
+            "roate": 180,
+            "confidence_first": 1.00,
+            "confidence_second": 0.32
+        },
+        {
+            "file_page_number": 4,
+            "form_type": "1385",
+            "source_form_page": 1,
+            "roate": 0,
+            "confidence_first": 1.00,
+            "confidence_second": 0.32
+        },
+        {
+            "file_page_number": 5,
+            "form_type": "1301",
+            "source_form_page": 4,
+            "roate": 0,
+            "confidence_first": 1.00,
+            "confidence_second": 0.32
+        }
+    ]
+}
