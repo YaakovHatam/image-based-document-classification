@@ -1,38 +1,64 @@
 import cv2 as cv
 import os
 import numpy as np
-from glob import glob
+from PIL import Image
+from typing import List
 
 # --------------------
 # CONFIG
 # --------------------
-TEMPLATE_DIR = "templates"
-TEST_DIR = "test_pages"
-OUT_DIR = "test_pages"
 
 IMG_WIDTH = 1024  # normalization width
 IMG_HEIGHT = 1448  # normalization height (A4 ~ 1:1.41 ratio)
 
 HEADER_RATIO = 0.15  # top 15% as header
 FOOTER_RATIO = 0.15  # bottom 15% as footer
-
+DEBUG_MODE = True
+DEBUG_OUTPUT_DIR = "debug_images"
 # ORB parameters
 orb = cv.ORB_create(nfeatures=500)
 bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
 
 
+def save_debug_image(step_name: str, img, prefix: str = "debug"):
+    """Save a debug image to the debug output directory."""
+    if not DEBUG_MODE:
+        return
+
+    # Convert PIL to NumPy if needed
+    if isinstance(img, Image.Image):
+        img = np.array(img)  # RGB
+        img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
+
+    filename = f"{prefix}_{step_name}.png"
+    cv.imwrite(os.path.join(DEBUG_OUTPUT_DIR, filename), img)
+
+
 # --------------------
 # IMAGE HELPERS
 # --------------------
-def preprocess(img_path):
-    """Load, grayscale, resize, and binarize."""
-    img = cv.imread(img_path)
+def preprocess(img: Image.Image):
+    """Convert to OpenCV format, grayscale, resize, and binarize."""
+    if isinstance(img, Image.Image):
+        img = np.array(img)  # PIL → NumPy (RGB)
+        img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
+
+    show_debug_image("Original", img)
+
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    show_debug_image("Gray", gray)
+
     gray = cv.resize(gray, (IMG_WIDTH, IMG_HEIGHT))
+    show_debug_image("Resized", gray)
+
     gray = cv.GaussianBlur(gray, (3, 3), 0)
+    show_debug_image("Blurred", gray)
+
     bin_img = cv.adaptiveThreshold(
         gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 15, 10
     )
+    show_debug_image("Binarized", bin_img)
+
     return bin_img
 
 
@@ -41,6 +67,10 @@ def get_header_footer(img):
     h = img.shape[0]
     header = img[0 : int(h * HEADER_RATIO), :]
     footer = img[int(h * (1 - FOOTER_RATIO)) :, :]
+
+    show_debug_image("Header", header)
+    show_debug_image("Footer", footer)
+
     return header, footer
 
 
@@ -83,6 +113,7 @@ def extract_features(img):
 # MATCHING/SCORING
 # --------------------
 
+
 def match_scores_pair(kp_p, des_p, kp_t, des_t):
     """
     Compute raw good-match count and geometric inliers between a page region and a template region.
@@ -96,23 +127,6 @@ def match_scores_pair(kp_p, des_p, kp_t, des_t):
 # --------------------
 # BUILD TEMPLATE DB
 # --------------------
-def build_template_db():
-    template_db = {}
-    for path in glob(os.path.join(TEMPLATE_DIR, "*")):
-        name = os.path.splitext(os.path.basename(path))[0]
-        img = preprocess(path)
-        header, footer = get_header_footer(img)
-
-        kp_h, des_h = extract_features(header)
-        kp_f, des_f = extract_features(footer)
-
-        template_db[name] = {
-            "header": {"kp": kp_h, "des": des_h, "kpts": len(kp_h or [])},
-            "footer": {"kp": kp_f, "des": des_f, "kpts": len(kp_f or [])},
-            "kpts_total": (len(kp_h or []) + len(kp_f or [])),
-        }
-        print(f"[TEMPLATE] Loaded {name} (header_kpts={len(kp_h or [])}, footer_kpts={len(kp_f or [])})")
-    return template_db
 
 
 # --------------------
@@ -126,22 +140,28 @@ def recognize_page(img_path, template_db):
     kp_f_p, des_f_p = extract_features(footer)
     page_kpts_total = len(kp_h_p or []) + len(kp_f_p or [])
 
-    scores = {}            # template_name -> primary score (inliers total)
-    details = {}           # template_name -> dict with raw/inliers/percentages
+    scores = {}  # template_name -> primary score (inliers total)
+    details = {}  # template_name -> dict with raw/inliers/percentages
 
     for template_name, feats in template_db.items():
         # Header region
-        raw_h, inl_h = match_scores_pair(kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"])
+        raw_h, inl_h = match_scores_pair(
+            kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"]
+        )
         # Footer region
-        raw_f, inl_f = match_scores_pair(kp_f_p, des_f_p, feats["footer"]["kp"], feats["footer"]["des"])
+        raw_f, inl_f = match_scores_pair(
+            kp_f_p, des_f_p, feats["footer"]["kp"], feats["footer"]["des"]
+        )
 
         raw_total = raw_h + raw_f
         inl_total = inl_h + inl_f
         tmpl_kpts_total = feats["kpts_total"]
 
         # Normalized percentages
-        pct_vs_template = (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
-        pct_dice = (2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0)
+        pct_vs_template = (
+            (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
+        )
+        pct_dice = 2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0
 
         scores[template_name] = inl_total
         details[template_name] = {
@@ -164,13 +184,15 @@ def recognize_page(img_path, template_db):
     # Second percentage: relative to best (for logging/reporting)
     best_inliers = max(v["inliers_total"] for v in details.values()) if details else 0
     for v in details.values():
-        v["pct_of_best"] = (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
+        v["pct_of_best"] = (
+            (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
+        )
 
     return best_template, best_score, scores, details
 
 
-def recognize_page_with_orientation(img_path, template_db):
-    img = preprocess(img_path)
+def recognize_page_with_orientation(img: Image.Image, template_db):
+    img = preprocess(img)
 
     def score_against_templates(image):
         header, footer = get_header_footer(image)
@@ -181,15 +203,23 @@ def recognize_page_with_orientation(img_path, template_db):
         scores = {}
         details = {}
         for template_name, feats in template_db.items():
-            raw_h, inl_h = match_scores_pair(kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"])
-            raw_f, inl_f = match_scores_pair(kp_f_p, des_f_p, feats["footer"]["kp"], feats["footer"]["des"])
+            raw_h, inl_h = match_scores_pair(
+                kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"]
+            )
+            raw_f, inl_f = match_scores_pair(
+                kp_f_p, des_f_p, feats["footer"]["kp"], feats["footer"]["des"]
+            )
 
             raw_total = raw_h + raw_f
             inl_total = inl_h + inl_f
             tmpl_kpts_total = feats["kpts_total"]
 
-            pct_vs_template = (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
-            pct_dice = (2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0)
+            pct_vs_template = (
+                (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
+            )
+            pct_dice = (
+                2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0
+            )
 
             scores[template_name] = inl_total
             details[template_name] = {
@@ -201,9 +231,13 @@ def recognize_page_with_orientation(img_path, template_db):
                 "pct_dice": float(pct_dice),
             }
 
-        best_inliers = max(v["inliers_total"] for v in details.values()) if details else 0
+        best_inliers = (
+            max(v["inliers_total"] for v in details.values()) if details else 0
+        )
         for v in details.values():
-            v["pct_of_best"] = (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
+            v["pct_of_best"] = (
+                (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
+            )
 
         return scores, details
 
@@ -239,51 +273,64 @@ def recognize_page_with_orientation(img_path, template_db):
 # --------------------
 # MAIN
 # --------------------
-def template_detection_main(test_dir, out_dir):
+def template_detection_main(
+    templates,
+    images: List[Image.Image],
+    out_dir: str,
+):
+    os.makedirs(out_dir, exist_ok=True)
     results_file = os.path.join(out_dir, "template_detection_results.txt")
-    
+
     print("[INFO] Building template database...")
-    template_db = build_template_db()
+
     with open(results_file, "w", encoding="utf-8") as f:
         print("\n[INFO] Recognizing test pages...")
-        for path in glob(os.path.join(test_dir, "*.png")):
+        for i, img in enumerate(images):
             best_template, best_score, all_scores, orientation, details = (
-                recognize_page_with_orientation(path, template_db)
+                recognize_page_with_orientation(img, templates)
             )
 
             d_best = details[best_template]
-            print(f"{os.path.basename(path)} -> {best_template}  "
-                  f"(inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
-                  f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
-                  f"dice={d_best['pct_dice']:.2f}%, "
-                  f"rel_best={d_best['pct_of_best']:.2f}%)")
+            print(
+                f"page{i} -> {best_template}  "
+                f"(inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
+                f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
+                f"dice={d_best['pct_dice']:.2f}%, "
+                f"rel_best={d_best['pct_of_best']:.2f}%)"
+            )
             print(f"Orientation: {orientation}")
 
             print("All templates (sorted by inliers):")
-            for template, score in sorted(all_scores.items(), key=lambda x: x[1], reverse=True):
+            for template, score in sorted(
+                all_scores.items(), key=lambda x: x[1], reverse=True
+            ):
                 dt = details[template]
-                print(f"  {template:25s} | inliers={dt['inliers_total']:4d} | raw={dt['raw_total']:4d} "
-                      f"| pct_vs_tmpl={dt['pct_vs_template']:6.2f}% | dice={dt['pct_dice']:6.2f}% "
-                      f"| rel_best={dt['pct_of_best']:6.2f}%")
+                print(
+                    f"  {template:25s} | inliers={dt['inliers_total']:4d} | raw={dt['raw_total']:4d} "
+                    f"| pct_vs_tmpl={dt['pct_vs_template']:6.2f}% | dice={dt['pct_dice']:6.2f}% "
+                    f"| rel_best={dt['pct_of_best']:6.2f}%"
+                )
 
             # --- Write to results file ---
-            f.write(f"Source: {os.path.basename(path)}\n")
+            f.write(f"Source: {os.path.basename(out_dir)}\n")
             f.write(f"  Orientation: {orientation}\n")
             f.write(f"  Best match: {best_template}\n")
-            f.write(f"    inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
-                    f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
-                    f"dice={d_best['pct_dice']:.2f}%, "
-                    f"rel_best={d_best['pct_of_best']:.2f}%\n")
+            f.write(
+                f"    inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
+                f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
+                f"dice={d_best['pct_dice']:.2f}%, "
+                f"rel_best={d_best['pct_of_best']:.2f}%\n"
+            )
             f.write("  All templates (sorted by inliers):\n")
-            for template, score in sorted(all_scores.items(), key=lambda x: x[1], reverse=True):
+            for template, score in sorted(
+                all_scores.items(), key=lambda x: x[1], reverse=True
+            ):
                 dt = details[template]
-                f.write(f"    {template}: inliers={dt['inliers_total']}, raw={dt['raw_total']}, "
-                        f"pct_vs_tmpl={dt['pct_vs_template']:.2f}%, dice={dt['pct_dice']:.2f}%, "
-                        f"rel_best={dt['pct_of_best']:.2f}%\n")
+                f.write(
+                    f"    {template}: inliers={dt['inliers_total']}, raw={dt['raw_total']}, "
+                    f"pct_vs_tmpl={dt['pct_vs_template']:.2f}%, dice={dt['pct_dice']:.2f}%, "
+                    f"rel_best={dt['pct_of_best']:.2f}%\n"
+                )
             f.write("\n" + "-" * 60 + "\n\n")
 
         print(f"\n[INFO] Results saved to: {results_file}")
-
-
-if __name__ == "__main__":
-    template_detection_main(TEST_DIR, OUT_DIR)
