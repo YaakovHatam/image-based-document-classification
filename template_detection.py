@@ -1,3 +1,4 @@
+DEBUG_STEP_COUNTER = 0
 import cv2 as cv
 import os
 import numpy as np
@@ -21,7 +22,8 @@ bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
 
 
 def save_debug_image(step_name: str, img, prefix: str = "debug"):
-    """Save a debug image to the debug output directory."""
+    """Save a debug image to the debug output directory with incremental step number."""
+    global DEBUG_STEP_COUNTER
     if not DEBUG_MODE:
         return
 
@@ -30,7 +32,8 @@ def save_debug_image(step_name: str, img, prefix: str = "debug"):
         img = np.array(img)  # RGB
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
-    filename = f"{prefix}_{step_name}.png"
+    DEBUG_STEP_COUNTER += 1
+    filename = f"{DEBUG_STEP_COUNTER:03d}_{prefix}_{step_name}.png"
     cv.imwrite(os.path.join(DEBUG_OUTPUT_DIR, filename), img)
 
 
