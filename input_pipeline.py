@@ -38,6 +38,3 @@ def pdf_to_images(pdf_path: str, output_dir: str) -> List[str]:
 
     doc.close()
     return image_paths
-
-
-__all__ = ["pdf_to_images"]
