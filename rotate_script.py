@@ -85,7 +85,7 @@ def process_page_images_from_json(
 # Example usage (commented)
 # ----------------------------
 if __name__ == "__main__":
-    include_map = {"1301-2022": [1, 3, 4], "1385": [1]}
+    include_map = {"1301-2022": [1], "1385": [1]}
     output_files = process_page_images_from_json(
         json_file_path="out/customer1/results.json",
         output_folder="output_assets",
