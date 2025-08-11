@@ -3,35 +3,29 @@ import numpy as np
 from typing import Tuple
 import os
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # pip install tomli for older Python
+
 IMG_WIDTH = 1024
 IMG_HEIGHT = 1448
 
 
-def preprocess(img_path: str) -> np.ndarray:
-    img = cv.imread(img_path)
-    if img is None:
-        raise FileNotFoundError(f"Could not read image: {img_path}")
-    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    gray = cv.resize(gray, (IMG_WIDTH, IMG_HEIGHT))
-    gray = cv.GaussianBlur(gray, (3, 3), 0)
-    bin_img = cv.adaptiveThreshold(
-        gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 15, 10
-    )
-    return bin_img
-
-
-def extract_region(image: np.ndarray, rect_pct: Tuple[float, float, float, float]) -> np.ndarray:
-    x_pct, y_pct, w_pct, h_pct = rect_pct
-    h, w = image.shape[:2]
-    x = int(x_pct * w)
-    y = int(y_pct * h)
-    w_px = int(w_pct * w)
-    h_px = int(h_pct * h)
-    return image[y:y + h_px, x:x + w_px]
+def load_rect_from_config(config_path: str, doc_type: str) -> Tuple[float, float, float, float]:
+    with open(config_path, "rb") as f:
+        cfg = tomllib.load(f)
+    rects = cfg.get("rects", {})
+    if doc_type in rects:
+        return tuple(rects[doc_type])
+    elif "default" in rects:
+        return tuple(rects["default"])
+    else:
+        raise KeyError(
+            f"No rect found for type '{doc_type}' and no default in config")
 
 
 def save_signature_region(img_path: str, rect_pct: Tuple[float, float, float, float], output_path: str):
-    # Ensure the output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     img = cv.imread(img_path)
@@ -47,16 +41,28 @@ def save_signature_region(img_path: str, rect_pct: Tuple[float, float, float, fl
 
     signature_crop = img_resized[y:y + h_px, x:x + w_px]
 
-    success = cv.imwrite(output_path, signature_crop)
-    if not success:
+    if not cv.imwrite(output_path, signature_crop):
         raise IOError(f"Failed to save image to {output_path}")
+
     print(f"Signature region saved to {output_path}")
 
 
 if __name__ == "__main__":
-    # Example usage:
-    # Suppose signature is in bottom right area
-    # rect = (0.70, 0.80, 0.25, 0.10)  # x%, y%, width%, height%
-    rect = (0.048, 0.71, 0.148, 0.082)  # x%, y%, width%, height%
-    save_signature_region("./signature_cutting_template/_page4.png",
-                          rect, "./out/signature/signature_only.png")
+    config_path = "./config.toml"
+    doc_type = "1385"  # the type you want
+    rect = load_rect_from_config(config_path, doc_type)
+
+    save_signature_region(
+        "./signature_cutting_template/_page4.png",
+        rect,
+        "./out/signature/signature_only_1385.png"
+    )
+
+    doc_type = "1301"  # the type you want
+    rect = load_rect_from_config(config_path, doc_type)
+
+    save_signature_region(
+        "./signature_cutting_template/_page1.png",
+        rect,
+        "./out/signature/signature_only_1301.png"
+    )

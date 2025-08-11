@@ -7,3 +7,7 @@ footer_ratio = 0.15
 [debug]
 mode = false
 output_dir = "./out/debug"
+
+[rects]
+"1385" = [0.048, 0.71, 0.148, 0.082]
+"1301"   = [0.032, 0.921, 0.149, 0.034]
