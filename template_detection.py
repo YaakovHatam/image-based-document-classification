@@ -324,10 +324,8 @@ def template_detection_main(
             "roate": 180 if orientation == "upside_down" else 0,
             "confidence_first_template": round(first_data["pct_of_best"] / 100, 2),
             "confidence_second_template": round(second_data["pct_of_best"] / 100, 2),
-            "second_source_form_page": (
-                int(second_template.split("_")[-1]) + 1
-                if "_" in second_template
-                else None
+            "second_source_form_type": (
+                second_template.split("_")[0] if second_template else None
             ),
             "page_path": os.path.join(out_dir, page_path_file),
         }
