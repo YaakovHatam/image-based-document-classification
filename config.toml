@@ -1,0 +1,9 @@
+[general]
+img_width = 1024
+img_height = 1448
+header_ratio = 0.15
+footer_ratio = 0.15
+
+[debug]
+mode = false
+output_dir = "./out/debug"

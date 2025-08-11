@@ -1,4 +1,5 @@
 DEBUG_STEP_COUNTER = 0
+from pathlib import Path
 import cv2 as cv
 import os
 import numpy as np
@@ -8,14 +9,20 @@ from typing import List
 # --------------------
 # CONFIG
 # --------------------
+import tomllib  # For Python 3.11+, use `import toml` for earlier versions
 
-IMG_WIDTH = 1024  # normalization width
-IMG_HEIGHT = 1448  # normalization height (A4 ~ 1:1.41 ratio)
+with open("config.toml", "rb") as f:
+    config = tomllib.load(f)
 
-HEADER_RATIO = 0.15  # top 15% as header
-FOOTER_RATIO = 0.15  # bottom 15% as footer
-DEBUG_MODE = True
-DEBUG_OUTPUT_DIR = "./out/debug"
+IMG_WIDTH = config["general"]["img_width"]
+IMG_HEIGHT = config["general"]["img_height"]
+HEADER_RATIO = config["general"]["header_ratio"]
+FOOTER_RATIO = config["general"]["footer_ratio"]
+
+DEBUG_MODE = config["debug"]["mode"]
+DEBUG_OUTPUT_DIR = config["debug"]["output_dir"]
+DEBUG_STEP_COUNTER = 0
+
 # ORB parameters
 orb = cv.ORB_create(nfeatures=500)
 bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
@@ -36,7 +43,7 @@ def save_debug_image(step_name: str, img, prefix: str = "debug"):
 
     DEBUG_STEP_COUNTER += 1
     filename = f"{DEBUG_STEP_COUNTER:03d}_{prefix}_{step_name}.png"
-    cv.imwrite(os.path.join(DEBUG_OUTPUT_DIR, filename), img)
+    cv.imwrite(os.path.join(DEBUG_OUTPUT_DIR, "debug", filename), img)
 
 
 # --------------------
@@ -281,7 +288,7 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 def template_detection_main(
     templates,
     images: List[Image.Image],
-    out_dir: str,
+    out_dir: Path,
 ):
     global DEBUG_OUTPUT_DIR
     global DEBUG_STEP_COUNTER
@@ -289,7 +296,7 @@ def template_detection_main(
     DEBUG_OUTPUT_DIR = out_dir
 
     os.makedirs(out_dir, exist_ok=True)
-    results_file = os.path.join(out_dir, "template_detection_results.txt")
+    results_file = out_dir / "template_detection_results.txt"
 
     print("[INFO] Building template database...")
 
