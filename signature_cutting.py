@@ -2,6 +2,7 @@ import cv2 as cv
 import numpy as np
 from typing import Tuple
 import os
+from pathlib import Path
 
 try:
     import tomllib  # Python 3.11+
@@ -44,25 +45,67 @@ def save_signature_region(img_path: str, rect_pct: Tuple[float, float, float, fl
     if not cv.imwrite(output_path, signature_crop):
         raise IOError(f"Failed to save image to {output_path}")
 
-    print(f"Signature region saved to {output_path}")
+    print(f"[OK] {Path(img_path).name} -> {output_path}")
 
 
+def process_folder_by_type_prefix(
+    input_dir: str,
+    output_dir: str,
+    config_path: str,
+    valid_exts=(".png", ".jpg", ".jpeg", ".tif", ".tiff"),
+) -> None:
+    """
+    For each file in input_dir whose filename starts with a type number until the
+    first underscore (e.g., '1385_formA.png' -> type '1385'), load the rect for
+    that type from config.toml and crop the signature region.
+
+    Saves to output_dir with '<stem>_signature<ext>'.
+    """
+    inp = Path(input_dir)
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    files = [p for p in inp.iterdir() if p.is_file()
+             and p.suffix.lower() in valid_exts]
+    if not files:
+        print(f"[WARN] No image files in {input_dir} matching {valid_exts}")
+        return
+
+    for p in files:
+        stem = p.stem  # e.g., "1385_formA"
+        if "_" not in stem:
+            print(f"[SKIP] {p.name}: no underscore to split type prefix")
+            continue
+
+        doc_type = stem.split("_", 1)[0]
+        if not doc_type.isdigit():
+            print(
+                f"[SKIP] {p.name}: prefix before '_' is not numeric ('{doc_type}')")
+            continue
+
+        try:
+            rect = load_rect_from_config(config_path, doc_type)
+        except KeyError as e:
+            print(f"[SKIP] {p.name}: {e}")
+            continue
+
+        out_name = f"{stem}_signature{p.suffix.lower()}"
+        out_path = str(out / out_name)
+
+        try:
+            save_signature_region(str(p), rect, out_path)
+        except Exception as e:
+            print(f"[ERR]  {p.name}: {e}")
+
+
+# -------- Example direct run --------
 if __name__ == "__main__":
+    # Single-file examples (your existing ones)
     config_path = "./config.toml"
-    doc_type = "1385"  # the type you want
-    rect = load_rect_from_config(config_path, doc_type)
 
-    save_signature_region(
-        "./signature_cutting_template/_page4.png",
-        rect,
-        "./out/signature/signature_only_1385.png"
-    )
-
-    doc_type = "1301"  # the type you want
-    rect = load_rect_from_config(config_path, doc_type)
-
-    save_signature_region(
-        "./signature_cutting_template/_page1.png",
-        rect,
-        "./out/signature/signature_only_1301.png"
+    # Batch: process all images in folder by type prefix
+    process_folder_by_type_prefix(
+        input_dir="./signature_cutting_template",
+        output_dir="./out/signature",
+        config_path=config_path,
     )
