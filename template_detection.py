@@ -286,70 +286,54 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 # MAIN
 # --------------------
 def template_detection_main(
-    templates,
-    images: List[Image.Image],
-    out_dir: Path,
+    templates, images: List[Image.Image], out_dir: Path, source_filename
 ):
     global DEBUG_OUTPUT_DIR
     global DEBUG_STEP_COUNTER
 
     DEBUG_OUTPUT_DIR = out_dir
 
-    os.makedirs(out_dir, exist_ok=True)
-    results_file = out_dir / "template_detection_results.txt"
+    results_dict = {"source_filename": Path(source_filename).name, "pages": []}
 
-    print("[INFO] Building template database...")
+    print("\n[INFO] Recognizing test pages...")
+    for i, img in enumerate(images):
+        best_template, best_score, all_scores, orientation, details = (
+            recognize_page_with_orientation(img, templates)
+        )
 
-    with open(results_file, "w", encoding="utf-8") as f:
-        print("\n[INFO] Recognizing test pages...")
-        for i, img in enumerate(images):
-            best_template, best_score, all_scores, orientation, details = (
-                recognize_page_with_orientation(img, templates)
-            )
+        sorted_templates = sorted(
+            details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
+        )
+        first_template, first_data = sorted_templates[0]
+        # Second best template details (if exists)
+        if len(sorted_templates) > 1:
+            second_template, second_data = sorted_templates[1]
+        else:
+            second_template, second_data = None, {"pct_of_best": 0.0}
 
-            d_best = details[best_template]
-            print(
-                f"page{i} -> {best_template}  "
-                f"(inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
-                f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
-                f"dice={d_best['pct_dice']:.2f}%, "
-                f"rel_best={d_best['pct_of_best']:.2f}%)"
-            )
-            print(f"Orientation: {orientation}")
+        page_path_file = f"{Path(source_filename).stem}_page{i+1}.png"
+        page_result = {
+            "file_page_number": i + 1,
+            "form_type": first_template.split("_")[0],  # adjust to your naming
+            "source_form_page": (
+                int(first_template.split("_")[-1]) + 1
+                if "_" in first_template
+                else None
+            ),
+            "roate": 180 if orientation == "upside_down" else 0,
+            "confidence_first_template": round(first_data["pct_of_best"] / 100, 2),
+            "confidence_second_template": round(second_data["pct_of_best"] / 100, 2),
+            "second_source_form_page": (
+                int(second_template.split("_")[-1]) + 1
+                if "_" in second_template
+                else None
+            ),
+            "page_path": os.path.join(out_dir, page_path_file),
+        }
+        # save image to out_dir
+        img.save(out_dir / page_path_file)
 
-            print("All templates (sorted by inliers):")
-            for template, score in sorted(
-                all_scores.items(), key=lambda x: x[1], reverse=True
-            ):
-                dt = details[template]
-                print(
-                    f"  {template:25s} | inliers={dt['inliers_total']:4d} | raw={dt['raw_total']:4d} "
-                    f"| pct_vs_tmpl={dt['pct_vs_template']:6.2f}% | dice={dt['pct_dice']:6.2f}% "
-                    f"| rel_best={dt['pct_of_best']:6.2f}%"
-                )
-
-            # --- Write to results file ---
-            f.write(f"Source: {os.path.basename(out_dir)}\n")
-            f.write(f"  Orientation: {orientation}\n")
-            f.write(f"  Best match: {best_template}\n")
-            f.write(
-                f"    inliers={d_best['inliers_total']}, raw={d_best['raw_total']}, "
-                f"pct_vs_tmpl={d_best['pct_vs_template']:.2f}%, "
-                f"dice={d_best['pct_dice']:.2f}%, "
-                f"rel_best={d_best['pct_of_best']:.2f}%\n"
-            )
-            f.write("  All templates (sorted by inliers):\n")
-            for template, score in sorted(
-                all_scores.items(), key=lambda x: x[1], reverse=True
-            ):
-                dt = details[template]
-                f.write(
-                    f"    {template}: inliers={dt['inliers_total']}, raw={dt['raw_total']}, "
-                    f"pct_vs_tmpl={dt['pct_vs_template']:.2f}%, dice={dt['pct_dice']:.2f}%, "
-                    f"rel_best={dt['pct_of_best']:.2f}%\n"
-                )
-            f.write("\n" + "-" * 60 + "\n\n")
-
-        print(f"\n[INFO] Results saved to: {results_file}")
+        results_dict["pages"].append(page_result)
 
     DEBUG_STEP_COUNTER = 0
+    return results_dict
