@@ -291,6 +291,7 @@ def template_detection_main(
     global DEBUG_OUTPUT_DIR
     global DEBUG_STEP_COUNTER
 
+    os.makedirs(out_dir, exist_ok=True)
     DEBUG_OUTPUT_DIR = out_dir
 
     results_dict = {"source_filename": Path(source_filename).name, "pages": []}
