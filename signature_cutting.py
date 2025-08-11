@@ -3,7 +3,6 @@ import numpy as np
 from typing import Tuple
 import os
 from pathlib import Path
-import re  # <-- NEW
 
 try:
     import tomllib  # Python 3.11+
@@ -57,9 +56,8 @@ def process_folder_by_type_prefix(
 ) -> None:
     """
     For each file in input_dir:
-      - Take text before first underscore as the prefix
-      - Extract leading digits from that prefix (e.g., '1301-2022' -> '1301')
-      - Use that number as the doc_type to load a rect from config
+      - Take everything before the first underscore as the doc_type
+      - Use doc_type as key in config.toml to load the rect
     """
     inp = Path(input_dir)
     out = Path(output_dir)
@@ -73,14 +71,11 @@ def process_folder_by_type_prefix(
 
     for p in files:
         stem = p.stem  # e.g., "1301-2022_customer1_page1"
-        prefix = stem.split("_", 1)[0]  # e.g., "1301-2022"
-
-        m = re.match(r"^(\d+)", prefix)
-        if not m:
-            print(f"[SKIP] {p.name}: no leading digits in prefix '{prefix}'")
+        if "_" not in stem:
+            print(f"[SKIP] {p.name}: no underscore to split type prefix")
             continue
 
-        doc_type = m.group(1)  # e.g., "1301"
+        doc_type = stem.split("_", 1)[0]  # e.g., "1301-2022" or "1385"
 
         try:
             rect = load_rect_from_config(config_path, doc_type)
@@ -98,10 +93,10 @@ def process_folder_by_type_prefix(
 
 
 # -------- Example direct run --------
-# if __name__ == "__main__":
-#     config_path = "./config.toml"
-#     process_folder_by_type_prefix(
-#         input_dir="./output_assets",
-#         output_dir="./out/signature",
-#         config_path=config_path,
-#     )
+if __name__ == "__main__":
+    config_path = "./config.toml"
+    process_folder_by_type_prefix(
+        input_dir="./output_assets",
+        output_dir="./out/signature",
+        config_path=config_path,
+    )

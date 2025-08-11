@@ -81,16 +81,30 @@ def process_page_images_from_json(
     return written
 
 
+
 # ----------------------------
-# Example usage (commented)
+# Process ALL customers under 'out/'
 # ----------------------------
 # if __name__ == "__main__":
+#     base_input = Path("out")              # contains subfolders like 'customer1', 'customer2', ...
+#     base_output = Path("output_assets")   # outputs go under 'output_assets/<customer>/'
 #     include_map = {"1301-2022": [1], "1385": [1]}
-#     output_files = process_page_images_from_json(
-#         json_file_path="out/customer1/results.json",
-#         output_folder="output_assets",
-#         include_map=include_map,
-#     )
-#     print("Saved files:")
-#     for f in output_files:
-#         print(f)
+
+#     for customer_dir in base_input.iterdir():
+#         if not customer_dir.is_dir():
+#             continue
+
+#         json_path = customer_dir / "results.json"  # adjust if your JSON has a different name
+#         if not json_path.exists():
+#             print(f"Skipping {customer_dir.name}: no results.json found")
+#             continue
+
+#         out_dir = base_output / customer_dir.name
+#         written = process_page_images_from_json(
+#             json_file_path=json_path,
+#             output_folder=out_dir,
+#             include_map=include_map,
+#         )
+#         print(f"[{customer_dir.name}] Saved {len(written)} files to {out_dir}")
+#         for p in written:
+#             print("  ", p)
