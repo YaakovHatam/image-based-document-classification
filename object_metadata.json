@@ -1,5 +1,5 @@
 {
-    "filename": "customer1.pdf",
+    "source_filename": "customer1.pdf",
     "pages": [
         {
             "file_page_number": 1,
@@ -7,7 +7,8 @@
             "source_form_page": 1,
             "roate": 90,
             "confidence_first": 1.00,
-            "confidence_second": 0.3
+            "confidence_second": 0.3,
+            "page_path": "customer1_page1.png"
         },
         {
             "file_page_number": 2,
@@ -15,7 +16,8 @@
             "source_form_page": 2,
             "roate": 0,
             "confidence_first": 1.00,
-            "confidence_second": 0.32
+            "confidence_second": 0.32,
+            "page_path": "customer1_page2.png"
         },
         {
             "file_page_number": 3,
@@ -23,7 +25,8 @@
             "source_form_page": 3,
             "roate": 180,
             "confidence_first": 1.00,
-            "confidence_second": 0.32
+            "confidence_second": 0.32,
+            "page_path": "customer1_page3.png"
         },
         {
             "file_page_number": 4,
@@ -31,7 +34,8 @@
             "source_form_page": 1,
             "roate": 0,
             "confidence_first": 1.00,
-            "confidence_second": 0.32
+            "confidence_second": 0.32,
+            "page_path": "customer1_page4.png"
         },
         {
             "file_page_number": 5,
@@ -39,7 +43,8 @@
             "source_form_page": 4,
             "roate": 0,
             "confidence_first": 1.00,
-            "confidence_second": 0.32
+            "confidence_second": 0.32,
+            "page_path": "customer1_page5.png"
         }
     ]
 }
