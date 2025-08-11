@@ -14,7 +14,7 @@ IMG_HEIGHT = 1448  # normalization height (A4 ~ 1:1.41 ratio)
 HEADER_RATIO = 0.15  # top 15% as header
 FOOTER_RATIO = 0.15  # bottom 15% as footer
 DEBUG_MODE = True
-DEBUG_OUTPUT_DIR = "debug_images"
+DEBUG_OUTPUT_DIR = "./out/debug"
 # ORB parameters
 orb = cv.ORB_create(nfeatures=500)
 bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
@@ -43,21 +43,21 @@ def preprocess(img: Image.Image):
         img = np.array(img)  # PIL → NumPy (RGB)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
-    show_debug_image("Original", img)
+    save_debug_image("Original", img)
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    show_debug_image("Gray", gray)
+    save_debug_image("Gray", gray)
 
     gray = cv.resize(gray, (IMG_WIDTH, IMG_HEIGHT))
-    show_debug_image("Resized", gray)
+    save_debug_image("Resized", gray)
 
     gray = cv.GaussianBlur(gray, (3, 3), 0)
-    show_debug_image("Blurred", gray)
+    save_debug_image("Blurred", gray)
 
     bin_img = cv.adaptiveThreshold(
         gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 15, 10
     )
-    show_debug_image("Binarized", bin_img)
+    save_debug_image("Binarized", bin_img)
 
     return bin_img
 
@@ -68,8 +68,8 @@ def get_header_footer(img):
     header = img[0 : int(h * HEADER_RATIO), :]
     footer = img[int(h * (1 - FOOTER_RATIO)) :, :]
 
-    show_debug_image("Header", header)
-    show_debug_image("Footer", footer)
+    save_debug_image("Header", header)
+    save_debug_image("Footer", footer)
 
     return header, footer
 
@@ -278,6 +278,9 @@ def template_detection_main(
     images: List[Image.Image],
     out_dir: str,
 ):
+    global DEBUG_OUTPUT_DIR
+    DEBUG_OUTPUT_DIR = out_dir
+
     os.makedirs(out_dir, exist_ok=True)
     results_file = os.path.join(out_dir, "template_detection_results.txt")
 
