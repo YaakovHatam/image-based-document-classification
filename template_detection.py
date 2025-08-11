@@ -27,6 +27,8 @@ def save_debug_image(step_name: str, img, prefix: str = "debug"):
     if not DEBUG_MODE:
         return
 
+    os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+
     # Convert PIL to NumPy if needed
     if isinstance(img, Image.Image):
         img = np.array(img)  # RGB
@@ -282,6 +284,8 @@ def template_detection_main(
     out_dir: str,
 ):
     global DEBUG_OUTPUT_DIR
+    global DEBUG_STEP_COUNTER
+
     DEBUG_OUTPUT_DIR = out_dir
 
     os.makedirs(out_dir, exist_ok=True)
@@ -340,3 +344,5 @@ def template_detection_main(
             f.write("\n" + "-" * 60 + "\n\n")
 
         print(f"\n[INFO] Results saved to: {results_file}")
+
+    DEBUG_STEP_COUNTER = 0
