@@ -4,3 +4,5 @@ __pycache__/
 old/
 out/
 wheelhouse/
+to_process/1*.pdf
+to_process/5*.pdf

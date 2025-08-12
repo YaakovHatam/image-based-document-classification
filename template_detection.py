@@ -1,4 +1,5 @@
 DEBUG_STEP_COUNTER = 0
+import json
 from pathlib import Path
 import cv2 as cv
 import os
@@ -18,6 +19,8 @@ IMG_WIDTH = config["general"]["img_width"]
 IMG_HEIGHT = config["general"]["img_height"]
 HEADER_RATIO = config["general"]["header_ratio"]
 FOOTER_RATIO = config["general"]["footer_ratio"]
+PCT_VS_TEMPLATE_TRESHOLD = config["general"]["pct_vs_template_treshold"]
+
 
 DEBUG_MODE = config["debug"]["mode"]
 DEBUG_OUTPUT_DIR = config["debug"]["output_dir"]
@@ -34,7 +37,7 @@ def save_debug_image(step_name: str, img, prefix: str = "debug"):
     if not DEBUG_MODE:
         return
 
-    os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(os.path.join(DEBUG_OUTPUT_DIR, "debug"), exist_ok=True)
 
     # Convert PIL to NumPy if needed
     if isinstance(img, Image.Image):
@@ -136,78 +139,12 @@ def match_scores_pair(kp_p, des_p, kp_t, des_t):
     return len(good), inliers
 
 
-# --------------------
-# BUILD TEMPLATE DB
-# --------------------
-
-
-# --------------------
-# RECOGNIZE PAGE
-# --------------------
-def recognize_page(img_path, template_db):
-    img = preprocess(img_path)
-    header, footer = get_header_footer(img)
-
-    kp_h_p, des_h_p = extract_features(header)
-    kp_f_p, des_f_p = extract_features(footer)
-    page_kpts_total = len(kp_h_p or []) + len(kp_f_p or [])
-
-    scores = {}  # template_name -> primary score (inliers total)
-    details = {}  # template_name -> dict with raw/inliers/percentages
-
-    for template_name, feats in template_db.items():
-        # Header region
-        raw_h, inl_h = match_scores_pair(
-            kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"]
-        )
-        # Footer region
-        raw_f, inl_f = match_scores_pair(
-            kp_f_p, des_f_p, feats["footer"]["kp"], feats["footer"]["des"]
-        )
-
-        raw_total = raw_h + raw_f
-        inl_total = inl_h + inl_f
-        tmpl_kpts_total = feats["kpts_total"]
-
-        # Normalized percentages
-        pct_vs_template = (
-            (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
-        )
-        pct_dice = 2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0
-
-        scores[template_name] = inl_total
-        details[template_name] = {
-            "raw_total": int(raw_total),
-            "inliers_total": int(inl_total),
-            "tmpl_kpts_total": int(tmpl_kpts_total),
-            "page_kpts_total": int(page_kpts_total),
-            "pct_vs_template": float(pct_vs_template),
-            "pct_dice": float(pct_dice),
-            "raw_header": int(raw_h),
-            "raw_footer": int(raw_f),
-            "inliers_header": int(inl_h),
-            "inliers_footer": int(inl_f),
-        }
-
-    # Determine best by inliers
-    best_template = max(scores, key=scores.get)
-    best_score = scores[best_template]
-
-    # Second percentage: relative to best (for logging/reporting)
-    best_inliers = max(v["inliers_total"] for v in details.values()) if details else 0
-    for v in details.values():
-        v["pct_of_best"] = (
-            (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
-        )
-
-    return best_template, best_score, scores, details
-
-
 def recognize_page_with_orientation(img: Image.Image, template_db):
     img = preprocess(img)
 
     def score_against_templates(image):
         header, footer = get_header_footer(image)
+
         kp_h_p, des_h_p = extract_features(header)
         kp_f_p, des_f_p = extract_features(footer)
         page_kpts_total = len(kp_h_p or []) + len(kp_f_p or [])
@@ -254,32 +191,12 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
         return scores, details
 
     # Normal orientation
-    scores_normal, details_normal = score_against_templates(img)
+    scores, details = score_against_templates(img)
 
-    # Rotated orientation (180 degrees)
-    rotated_img = cv.rotate(img, cv.ROTATE_180)
-    scores_rotated, details_rotated = score_against_templates(rotated_img)
+    best_template = max(scores, key=scores.get)
+    best_score = scores[best_template]
 
-    best_template_normal = max(scores_normal, key=scores_normal.get)
-    best_score_normal = scores_normal[best_template_normal]
-
-    best_template_rotated = max(scores_rotated, key=scores_rotated.get)
-    best_score_rotated = scores_rotated[best_template_rotated]
-
-    if best_score_rotated > best_score_normal:
-        orientation = "upside_down"
-        best_template = best_template_rotated
-        best_score = best_score_rotated
-        scores = scores_rotated
-        details = details_rotated
-    else:
-        orientation = "normal"
-        best_template = best_template_normal
-        best_score = best_score_normal
-        scores = scores_normal
-        details = details_normal
-
-    return best_template, best_score, scores, orientation, details
+    return best_template, best_score, scores, details
 
 
 # --------------------
@@ -296,39 +213,52 @@ def template_detection_main(
 
     results_dict = {"source_filename": Path(source_filename).name, "pages": []}
 
-    print("\n[INFO] Recognizing test pages...")
+    print("\n[INFO] Recognizing test pages:", source_filename)
     for i, img in enumerate(images):
-        best_template, best_score, all_scores, orientation, details = (
-            recognize_page_with_orientation(img, templates)
-        )
+        (
+            best_template,
+            best_score,
+            all_scores,
+            details,
+        ) = recognize_page_with_orientation(img, templates)
 
         sorted_templates = sorted(
             details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
         )
+        if DEBUG_MODE:
+            with open(out_dir / f"sorted_templates_page_{i+1}.json", "w") as f:
+                json.dump(sorted_templates, f, indent=4)
+
         first_template, first_data = sorted_templates[0]
-        # Second best template details (if exists)
-        if len(sorted_templates) > 1:
-            second_template, second_data = sorted_templates[1]
-        else:
-            second_template, second_data = None, {"pct_of_best": 0.0}
 
         page_path_file = f"{Path(source_filename).stem}_page{i+1}.png"
-        page_result = {
-            "file_page_number": i + 1,
-            "form_type": first_template.split("_")[0],  # adjust to your naming
-            "source_form_page": (
-                int(first_template.split("_")[-1]) + 1
-                if "_" in first_template
-                else None
-            ),
-            "roate": 180 if orientation == "upside_down" else 0,
-            "confidence_first_template": round(first_data["pct_of_best"] / 100, 2),
-            "confidence_second_template": round(second_data["pct_of_best"] / 100, 2),
-            "second_source_form_type": (
-                second_template.split("_")[0] if second_template else None
-            ),
-            "page_path": os.path.join(out_dir, page_path_file),
-        }
+
+        if first_data["pct_vs_template"] < PCT_VS_TEMPLATE_TRESHOLD:
+            page_result = {
+                "file_page_number": i + 1,
+                "predicted_form_type": "None",
+                "predicted_form_page": -1,
+                "rotate": 0 if first_template.find("rotated") == -1 else 180,
+                "pct_vs_template": 0,
+                "pct_dice": 0,
+                "page_path": os.path.join(out_dir, page_path_file),
+            }
+        else:
+            page_result = {
+                "file_page_number": i + 1,
+                "predicted_form_type": first_template.split("_")[
+                    0
+                ],  # adjust to your naming
+                "predicted_form_page": (
+                    int(first_template.split("_")[-1])
+                    if "_" in first_template
+                    else None
+                ),
+                "rotate": 0 if first_template.find("rotated") == -1 else 180,
+                "pct_vs_template": first_data["pct_vs_template"],
+                "pct_dice": first_data["pct_dice"],
+                "page_path": os.path.join(out_dir, page_path_file),
+            }
         # save image to out_dir
         img.save(out_dir / page_path_file)
 

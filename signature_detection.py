@@ -33,7 +33,9 @@ def preprocess(img_path: str) -> np.ndarray:
     return bin_img
 
 
-def extract_region(image: np.ndarray, rect_pct: Tuple[float, float, float, float]) -> np.ndarray:
+def extract_region(
+    image: np.ndarray, rect_pct: Tuple[float, float, float, float]
+) -> np.ndarray:
     """Extract a rectangular region using percentage-based coordinates.
 
     Parameters
@@ -60,7 +62,9 @@ def extract_region(image: np.ndarray, rect_pct: Tuple[float, float, float, float
 
 
 def detect_signature(
-    img_path: str, rect_pct: Tuple[float, float, float, float], ink_threshold: float = 0.01
+    img_path: str,
+    rect_pct: Tuple[float, float, float, float],
+    ink_threshold: float = 0.01,
 ) -> Tuple[bool, float]:
     """Determine whether a signature is present in the specified region.
 
@@ -97,6 +101,8 @@ def detect_signature(
 
 
 if __name__ == "__main__":
+    signature, ratio = detect_signature("./1344-sig-3-2023-2/")
+
     import argparse
 
     parser = argparse.ArgumentParser(description="Detect signature presence in a page")
