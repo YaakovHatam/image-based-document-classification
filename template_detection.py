@@ -12,6 +12,25 @@ from typing import List
 # --------------------
 import tomllib  # For Python 3.11+, use `import toml` for earlier versions
 
+# Ensure config.toml exists and has the required keys
+# For demonstration, creating a dummy config if it doesn't exist.
+if not os.path.exists("config.toml"):
+    default_config = """
+[general]
+img_width = 800
+img_height = 1000
+header_ratio = 0.2
+footer_ratio = 0.2
+pct_vs_template_treshold = 10.0
+
+[debug]
+mode = true
+output_dir = "debug_output"
+"""
+    with open("config.toml", "w") as f:
+        f.write(default_config)
+
+
 with open("config.toml", "rb") as f:
     config = tomllib.load(f)
 
@@ -108,7 +127,12 @@ def knn_ratio_matches(des_t, des_p, ratio=0.75):
     """
     if des_t is None or des_p is None:
         return []
-    knn = bf.knnMatch(des_t, des_p, k=2)
+    # bf.knnMatch can throw an error if descriptors are empty
+    try:
+        knn = bf.knnMatch(des_t, des_p, k=2)
+    except cv.error:
+        return []
+
     good = []
     for pair in knn:
         if len(pair) == 2:
@@ -140,10 +164,14 @@ def match_scores_pair(kp_p, des_p, kp_t, des_t):
 
 
 def recognize_page_with_orientation(img: Image.Image, template_db):
-    img = preprocess(img)
+    """
+    Recognizes a page by checking both normal and 180-degree rotated orientations.
+    Returns the best match, its score, orientation, and detailed scores.
+    """
+    img_normal = preprocess(img)
 
-    def score_against_templates(image):
-        header, footer = get_header_footer(image)
+    def score_against_templates(image_to_test):
+        header, footer = get_header_footer(image_to_test)
 
         kp_h_p, des_h_p = extract_features(header)
         kp_f_p, des_f_p = extract_features(footer)
@@ -151,6 +179,9 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 
         scores = {}
         details = {}
+        if not template_db:  # Handle empty template database
+            return {}, {}
+
         for template_name, feats in template_db.items():
             raw_h, inl_h = match_scores_pair(
                 kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"]
@@ -180,9 +211,10 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
                 "pct_dice": float(pct_dice),
             }
 
-        best_inliers = (
-            max(v["inliers_total"] for v in details.values()) if details else 0
-        )
+        if not details:  # Handle no templates matched
+            return {}, {}
+
+        best_inliers = max(v["inliers_total"] for v in details.values())
         for v in details.values():
             v["pct_of_best"] = (
                 (v["inliers_total"] / best_inliers * 100.0) if best_inliers > 0 else 0.0
@@ -190,13 +222,41 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 
         return scores, details
 
-    # Normal orientation
-    scores, details = score_against_templates(img)
+    # === Score Normal Orientation (0 degrees) ===
+    print("[INFO] Checking normal orientation (0 degrees)...")
+    scores_normal, details_normal = score_against_templates(img_normal)
+    best_template_normal = (
+        max(scores_normal, key=scores_normal.get) if scores_normal else None
+    )
+    best_score_normal = scores_normal.get(best_template_normal, 0)
 
-    best_template = max(scores, key=scores.get)
-    best_score = scores[best_template]
+    # === Score Rotated Orientation (180 degrees) ===
+    print("[INFO] Checking rotated orientation (180 degrees)...")
+    img_rotated = cv.rotate(img_normal, cv.ROTATE_180)
+    save_debug_image("Input_Rotated_180_Degrees", img_rotated)
+    scores_rotated, details_rotated = score_against_templates(img_rotated)
+    best_template_rotated = (
+        max(scores_rotated, key=scores_rotated.get) if scores_rotated else None
+    )
+    best_score_rotated = scores_rotated.get(best_template_rotated, 0)
 
-    return best_template, best_score, scores, details
+    # === Compare and select the best orientation ===
+    if best_score_normal >= best_score_rotated:
+        print(f"[INFO] Best match is NORMAL orientation. Score: {best_score_normal}")
+        if not best_template_normal:  # Handle case where no templates matched at all
+            return "None", 0, 0, {}, {}
+        return best_template_normal, best_score_normal, 0, scores_normal, details_normal
+    else:
+        print(f"[INFO] Best match is ROTATED orientation. Score: {best_score_rotated}")
+        if not best_template_rotated:  # Handle case where no templates matched at all
+            return "None", 0, 0, {}, {}
+        return (
+            best_template_rotated,
+            best_score_rotated,
+            180,
+            scores_rotated,
+            details_rotated,
+        )
 
 
 # --------------------
@@ -215,30 +275,41 @@ def template_detection_main(
 
     print("\n[INFO] Recognizing test pages:", source_filename)
     for i, img in enumerate(images):
+        DEBUG_STEP_COUNTER = 0  # Reset counter for each page
         (
             best_template,
             best_score,
+            orientation,  # <-- Receive orientation
             all_scores,
             details,
         ) = recognize_page_with_orientation(img, templates)
 
-        sorted_templates = sorted(
-            details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
-        )
-        if DEBUG_MODE:
+        if not details:  # Check if any details were returned
+            print(f"[WARNING] No match found for page {i+1}.")
+            sorted_templates = []
+            first_data = {"pct_vs_template": 0, "pct_dice": 0}
+            first_template = "None"
+        else:
+            sorted_templates = sorted(
+                details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
+            )
+            first_template, first_data = sorted_templates[0]
+
+        if DEBUG_MODE and sorted_templates:
             with open(out_dir / f"sorted_templates_page_{i+1}.json", "w") as f:
                 json.dump(sorted_templates, f, indent=4)
 
-        first_template, first_data = sorted_templates[0]
-
         page_path_file = f"{Path(source_filename).stem}_page{i+1}.png"
 
-        if first_data["pct_vs_template"] < PCT_VS_TEMPLATE_TRESHOLD:
+        if (
+            first_template == "None"
+            or first_data["pct_vs_template"] < PCT_VS_TEMPLATE_TRESHOLD
+        ):
             page_result = {
                 "file_page_number": i + 1,
                 "predicted_form_type": "None",
                 "predicted_form_page": -1,
-                "rotate": 0 if first_template.find("rotated") == -1 else 180,
+                "rotate": orientation,  # <-- Use detected orientation
                 "pct_vs_template": 0,
                 "pct_dice": 0,
                 "page_path": os.path.join(out_dir, page_path_file),
@@ -246,15 +317,13 @@ def template_detection_main(
         else:
             page_result = {
                 "file_page_number": i + 1,
-                "predicted_form_type": first_template.split("_")[
-                    0
-                ],  # adjust to your naming
+                "predicted_form_type": first_template.split("_")[0],
                 "predicted_form_page": (
                     int(first_template.split("_")[-1])
-                    if "_" in first_template
-                    else None
+                    if "_" in first_template and first_template.split("_")[-1].isdigit()
+                    else -1
                 ),
-                "rotate": 0 if first_template.find("rotated") == -1 else 180,
+                "rotate": orientation,  # <-- Use detected orientation
                 "pct_vs_template": first_data["pct_vs_template"],
                 "pct_dice": first_data["pct_dice"],
                 "page_path": os.path.join(out_dir, page_path_file),
@@ -264,5 +333,4 @@ def template_detection_main(
 
         results_dict["pages"].append(page_result)
 
-    DEBUG_STEP_COUNTER = 0
     return results_dict
