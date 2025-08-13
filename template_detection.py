@@ -329,6 +329,8 @@ def template_detection_main(
                 "page_path": os.path.join(out_dir, page_path_file),
             }
         # save image to out_dir
+        if orientation == 180:
+            img = img.rotate(180, expand=True)
         img.save(out_dir / page_path_file)
 
         results_dict["pages"].append(page_result)
