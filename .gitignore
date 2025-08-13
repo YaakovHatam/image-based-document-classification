@@ -6,3 +6,5 @@ out/
 wheelhouse/
 to_process/1*.pdf
 to_process/5*.pdf
+output_assets/
+to_process/not-forms.pdf
