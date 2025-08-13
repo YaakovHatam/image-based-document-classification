@@ -1,7 +1,0 @@
-opencv-python
-pillow
-PyMuPDF
-matplotlib
-numpy
-scikit-image
-scipy
