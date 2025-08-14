@@ -17,3 +17,26 @@ output_dir = "./out"
 "1344-2021" = [0.3, 0.64, 0.354, 0.21]
 "1344-2022" = [0.3, 0.64, 0.354, 0.21]
 "1344-2023" = [0.3, 0.64, 0.354, 0.21]
+
+# --- NEW: which pages to include per form type ---
+[include_map]
+"1385"       = [1]
+"1301-2022"  = [1]
+"1344-2020"  = [1]
+"1344-2021"  = [1]
+"1344-2022"  = [1]
+"1344-2023"  = [1]
+
+[signature_thresholds]
+# Score bands:
+#   score < maybe_lower            -> none
+#   maybe_lower <= score < yes_lower -> review
+#   score >= yes_lower             -> present
+maybe_lower = 0.6
+yes_lower   = 0.7
+
+[sign_labels]
+# You can rename these three labels freely:
+none    = "none"
+review  = "review"
+present = "present"
