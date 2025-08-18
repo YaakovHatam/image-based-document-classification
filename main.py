@@ -1,3 +1,4 @@
+import csv
 from glob import glob
 import json
 import os
@@ -133,6 +134,22 @@ def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path(
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
+        # Also write a CSV mirror of the per-file results
+    csv_path = out_root / "signature_summary_all.csv"
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["pdf_folder", "file", "doc_type",
+                        "sign_level", "score", "error"])
+        for r in all_rows:
+            writer.writerow([
+                r.get("pdf_folder", ""),
+                r.get("file", ""),
+                r.get("doc_type", ""),
+                r.get("sign_level", ""),
+                r.get("score", ""),
+                r.get("error", ""),
+            ])
+
     # NEW: dedicated errors list (easy to scan)
     errors = [
         {
@@ -152,6 +169,7 @@ def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path(
     print("\n========================")
     print(f"Present (\"{present_label}\") rate: {detection_rate:.2%}")
     print(f"Summary: {summary_path}")
+    print(f"Summary csv: {csv_path}")
     if errors:
         print(
             f"Errors: {len(errors)} (see {out_root/'signature_errors.json'})")
