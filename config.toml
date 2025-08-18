@@ -1,6 +1,6 @@
 [general]
-img_width = 1024
-img_height = 1448
+img_width = 596
+img_height = 842
 header_ratio = 0.25
 footer_ratio = 0.25
 pct_vs_template_treshold = 2.4
@@ -20,12 +20,12 @@ output_dir = "./out"
 
 # --- NEW: which pages to include per form type ---
 [include_map]
-"1385"       = [1]
-"1301-2022"  = [1]
-"1344-2020"  = [1]
-"1344-2021"  = [1]
-"1344-2022"  = [1]
-"1344-2023"  = [1]
+"1385" = [1]
+"1301-2022" = [1]
+"1344-2020" = [1]
+"1344-2021" = [1]
+"1344-2022" = [1]
+"1344-2023" = [1]
 
 [signature_thresholds]
 # Score bands:
@@ -33,13 +33,13 @@ output_dir = "./out"
 #   maybe_lower <= score < yes_lower -> review
 #   score >= yes_lower             -> present
 maybe_lower = 0.6
-yes_lower   = 0.7
+yes_lower = 0.7
 
 [sign_labels]
 # You can rename these three labels freely:
-none    = "none"
-review  = "review"
+none = "none"
+review = "review"
 present = "present"
 
 [pipeline]
-splitting_only = false   # set to true to do ONLY PDF -> images
+splitting_only = false # set to true to do ONLY PDF -> images
