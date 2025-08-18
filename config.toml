@@ -1,6 +1,6 @@
 [general]
-img_width = 596
-img_height = 842
+img_width = 1024
+img_height = 1448
 header_ratio = 0.25
 footer_ratio = 0.25
 pct_vs_template_treshold = 2.4
