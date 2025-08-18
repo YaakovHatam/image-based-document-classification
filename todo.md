@@ -4,3 +4,4 @@
 2. Create general config, and template specific section in the config that can override the general config.
 3. Option to operate in DEBUG mode.
 4. Create robust tests
+5. logger

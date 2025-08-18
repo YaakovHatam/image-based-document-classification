@@ -12,7 +12,6 @@ import tomllib  # Python 3.11+
 # your modules
 from input_pipeline import pdf_to_images
 from sig_detector import sig_detector_main, load_signature_thresholds, load_sign_labels
-from signature_cutting import process_folder_by_type_prefix  # keep if you use it
 from template_detection import template_detection_main
 from templates_db import build_template_db
 from files_selector import process_page_images_from_json
@@ -27,19 +26,16 @@ def _load_include_map_from_toml(toml_path: Path) -> Dict[str, List[int]]:
         cfg = tomllib.load(f)
 
     if "include_map" not in cfg:
-        raise KeyError(
-            "config.toml must contain a top-level [include_map] table.")
+        raise KeyError("config.toml must contain a top-level [include_map] table.")
 
     raw = cfg["include_map"]
     if not isinstance(raw, dict):
-        raise TypeError(
-            "[include_map] must be a table of form_type = [page_numbers].")
+        raise TypeError("[include_map] must be a table of form_type = [page_numbers].")
 
     include_map: Dict[str, List[int]] = {}
     for k, v in raw.items():
         if not isinstance(v, list):
-            raise TypeError(
-                f"[include_map] '{k}' must be a list of page numbers.")
+            raise TypeError(f"[include_map] '{k}' must be a list of page numbers.")
         include_map[str(k)] = [int(x) for x in v]
     return include_map
 
@@ -120,9 +116,10 @@ def run_pipeline(
             json_file_path=json_path, include_map=include_map
         )
 
-        results = sig_detector_main(
-            files=files, thresh=thresholds["yes_lower"], debug=True
-        ) or []
+        results = (
+            sig_detector_main(files=files, thresh=thresholds["yes_lower"], debug=True)
+            or []
+        )
 
         for r in results:
             all_rows.append(
@@ -172,8 +169,9 @@ def run_pipeline(
     csv_path = out_root / "signature_summary_all.csv"
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["pdf_folder", "file", "doc_type",
-                        "sign_level", "score", "error"])
+        writer.writerow(
+            ["pdf_folder", "file", "doc_type", "sign_level", "score", "error"]
+        )
         for r in all_rows:
             writer.writerow(
                 [
@@ -202,12 +200,11 @@ def run_pipeline(
     )
 
     print("\n========================")
-    print(f"Present (\"{present_label}\") rate: {detection_rate:.2%}")
+    print(f'Present ("{present_label}") rate: {detection_rate:.2%}')
     print(f"Summary: {summary_path}")
     print(f"Summary csv: {csv_path}")
     if errors:
-        print(
-            f"Errors: {len(errors)} (see {out_root/'signature_errors.json'})")
+        print(f"Errors: {len(errors)} (see {out_root/'signature_errors.json'})")
         for e in errors[:10]:
             print(f" - {e['pdf_folder']}/{e['file']}: {e.get('error')}")
         if len(errors) > 10:
