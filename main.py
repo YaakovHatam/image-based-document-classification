@@ -21,8 +21,8 @@ from files_selector import process_page_images_from_json
 def _load_include_map_from_toml(toml_path: Path) -> Dict[str, List[int]]:
     if not toml_path.is_file():
         raise FileNotFoundError(
-            f"Missing {toml_path}. Please add an [include_map] section.")
-
+            f"Missing {toml_path}. Please add an [include_map] section."
+        )
     with open(toml_path, "rb") as f:
         cfg = tomllib.load(f)
 
@@ -44,10 +44,26 @@ def _load_include_map_from_toml(toml_path: Path) -> Dict[str, List[int]]:
     return include_map
 
 
-def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path("config.toml")) -> Path:
+def _load_splitting_only_flag(toml_path: Path) -> bool:
+    """
+    Read [pipeline].splitting_only (bool) from config.toml.
+    Defaults to False if the section/key is missing.
+    """
+    if not toml_path.is_file():
+        return False
+    with open(toml_path, "rb") as f:
+        cfg = tomllib.load(f)
+    return bool(cfg.get("pipeline", {}).get("splitting_only", False))
+
+
+def run_pipeline(
+    to_process_dir: Path, out_root: Path, config_toml: Path = Path("config.toml")
+) -> Path:
     """
     End-to-end run on 'to_process_dir', write under 'out_root' (clean), config from 'config_toml'.
-    Returns path to summary JSON: out_root / 'signature_summary_all.json'
+    Returns:
+      - if splitting_only=True  -> returns 'out_root' (no summary generated)
+      - else                    -> returns path to 'out_root/signature_summary_all.json'
     """
     # Clean output for a fresh run
     if out_root.exists():
@@ -55,17 +71,31 @@ def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path(
     out_root.mkdir(parents=True, exist_ok=True)
 
     templates = build_template_db()
+    splitting_only = _load_splitting_only_flag(config_toml)
 
     # 1) PDFs -> images + template detection
+    processed_count = 0
     for path in glob(str(to_process_dir / "*.pdf")):
         pdf_to_process = Path(path)
         images = pdf_to_images(pdf_to_process)
         out_dir = out_root / pdf_to_process.stem
         results_dict = template_detection_main(
-            templates, images, out_dir, pdf_to_process.name)
+            templates, images, out_dir, pdf_to_process.name
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         with open(out_dir / "results.json", "w", encoding="utf-8") as f:
             json.dump(results_dict, f, indent=4, ensure_ascii=False)
+        processed_count += 1
+
+    # --- STOP here if splitting_only=true ---
+    if splitting_only:
+        print("\n========================")
+        print("Splitting-only mode enabled ([pipeline].splitting_only = true)")
+        print(f"Processed {processed_count} PDF(s).")
+        print("Stopping after step 1 (PDFs -> images + template detection).")
+        print(f"Outputs are under: {out_root}")
+        print("========================\n")
+        return out_root  # simple and clear
 
     # 2) include_map
     include_map = _load_include_map_from_toml(config_toml)
@@ -87,22 +117,26 @@ def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path(
             continue
 
         files = process_page_images_from_json(
-            json_file_path=json_path, include_map=include_map)
+            json_file_path=json_path, include_map=include_map
+        )
 
         results = sig_detector_main(
-            files=files, thresh=thresholds["yes_lower"], debug=True) or []
+            files=files, thresh=thresholds["yes_lower"], debug=True
+        ) or []
 
         for r in results:
-            all_rows.append({
-                "pdf_folder": pdf_folder.name,
-                "file": r.get("file", ""),
-                "doc_type": r.get("doc_type", ""),
-                # "none" | "review" | "present" | "error"
-                "sign_level": r.get("sign_level", ""),
-                "score": r.get("score"),
-                # <<--- NEW: bubble up any error message
-                "error": r.get("error")
-            })
+            all_rows.append(
+                {
+                    "pdf_folder": pdf_folder.name,
+                    "file": r.get("file", ""),
+                    "doc_type": r.get("doc_type", ""),
+                    # "none" | "review" | "present" | "error"
+                    "sign_level": r.get("sign_level", ""),
+                    "score": r.get("score"),
+                    # bubble up any error message
+                    "error": r.get("error"),
+                }
+            )
 
     # 4) Write consolidated JSON(s)
     total = len(all_rows)
@@ -127,43 +161,44 @@ def run_pipeline(to_process_dir: Path, out_root: Path, config_toml: Path = Path(
             "run_timestamp": datetime.now().isoformat(timespec="seconds"),
         },
         "by_sign_level": by_sign_level,
-        "files": all_rows
+        "files": all_rows,
     }
 
     summary_path = out_root / "signature_summary_all.json"
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
-        # Also write a CSV mirror of the per-file results
+    # Also write a CSV mirror of the per-file results
     csv_path = out_root / "signature_summary_all.csv"
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["pdf_folder", "file", "doc_type",
                         "sign_level", "score", "error"])
         for r in all_rows:
-            writer.writerow([
-                r.get("pdf_folder", ""),
-                r.get("file", ""),
-                r.get("doc_type", ""),
-                r.get("sign_level", ""),
-                r.get("score", ""),
-                r.get("error", ""),
-            ])
+            writer.writerow(
+                [
+                    r.get("pdf_folder", ""),
+                    r.get("file", ""),
+                    r.get("doc_type", ""),
+                    r.get("sign_level", ""),
+                    r.get("score", ""),
+                    r.get("error", ""),
+                ]
+            )
 
-    # NEW: dedicated errors list (easy to scan)
+    # Dedicated errors list (easy to scan)
     errors = [
         {
             "pdf_folder": r["pdf_folder"],
             "file": r["file"],
             "doc_type": r["doc_type"],
-            "error": r.get("error")
+            "error": r.get("error"),
         }
         for r in all_rows
         if r.get("sign_level") == "error" or r.get("error")
     ]
     (out_root / "signature_errors.json").write_text(
-        json.dumps(errors, indent=2, ensure_ascii=False),
-        encoding="utf-8"
+        json.dumps(errors, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
     print("\n========================")

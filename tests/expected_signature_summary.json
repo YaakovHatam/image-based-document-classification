@@ -59,8 +59,8 @@
             "pdf_folder": "customer5",
             "file": "customer5_page1.png",
             "doc_type": "1385",
-            "sign_level": "none",
-            "score": 0.0
+            "sign_level": "present",
+            "score": 0.7908
         }
     ]
 }

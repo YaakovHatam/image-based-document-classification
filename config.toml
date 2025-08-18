@@ -40,3 +40,6 @@ yes_lower   = 0.7
 none    = "none"
 review  = "review"
 present = "present"
+
+[pipeline]
+splitting_only = false   # set to true to do ONLY PDF -> images

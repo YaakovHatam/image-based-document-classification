@@ -11,10 +11,19 @@ python -m venv .venv
 pip install -r .\req.txt
 ```
 
-## Run Signature Cutting
 
-Execute the following command to run the signature cutting script:
+## Run Main Script
+
+To run the main program:
 
 ```powershell
-python .\signature_cutting.py
+python .\main.py
+```
+
+## Run Tests
+
+To execute tests using pytest:
+
+```powershell
+pytest -q
 ```
