@@ -8,6 +8,12 @@ import numpy as np
 from skimage import measure
 
 
+# Read config
+with open("config.toml", "rb") as f:
+    config = tomllib.load(f)
+DEBUG_OUTPUT_DIR = config["debug"]["output_dir"]
+
+
 def load_rect_from_config(doc_type: str) -> Tuple[float, float, float, float]:
     """Load signature ROI rectangle for a document type from config.toml [rects]."""
     with open("config.toml", "rb") as f:
@@ -139,7 +145,7 @@ def shape_score(
     Softer defaults to handle thin/small signatures.
     """
     fg = remove_lines(roi_bw, horiz_len, vert_len,
-                      debug_folder=debug_folder, step_prefix="02")
+                      debug_folder=DEBUG_OUTPUT_DIR, step_prefix="02")
     fg = cv2.dilate(fg, cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE, (2, 2)), 1)
     if debug_folder:
@@ -221,7 +227,7 @@ def detect_signature(
         cv2.imwrite(os.path.join(debug_folder, "01_roi_bw.png"), roi_bw)
         cv2.imwrite(os.path.join(debug_folder, "01_roi_color.png"), roi_color)
 
-    s = shape_score(roi_bw, debug_folder=debug_folder)
+    s = shape_score(roi_bw, debug_folder=DEBUG_OUTPUT_DIR)
     return s, (x1, y1, x2, y2), roi_color
 
 
@@ -247,7 +253,7 @@ def sig_detector_main(files: List[Tuple[Path, str]], thresh: Optional[float] = N
             doc_basename = os.path.splitext(doc_basename_ext)[0]
             doc_folder = os.path.dirname(f) or "."
 
-            debug_folder = None
+            debug_folder = DEBUG_OUTPUT_DIR
             if debug:
                 debug_folder = os.path.join(doc_folder, "sig_debug")
                 os.makedirs(debug_folder, exist_ok=True)

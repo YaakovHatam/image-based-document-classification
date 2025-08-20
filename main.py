@@ -17,6 +17,12 @@ from templates_db import build_template_db
 from files_selector import process_page_images_from_json
 
 
+# Read config
+with open("config.toml", "rb") as f:
+    config = tomllib.load(f)
+DEBUG_MODE = config["debug"]["mode"]
+
+
 def _load_include_map_from_toml(toml_path: Path) -> Dict[str, List[int]]:
     if not toml_path.is_file():
         raise FileNotFoundError(
@@ -74,7 +80,7 @@ def run_pipeline(
     for path in glob(str(to_process_dir / "*.pdf")):
         pdf_to_process = Path(path)
         images = pdf_to_images(pdf_to_process)
-        out_dir = out_root / pdf_to_process.stem
+        out_dir = out_root / pdf_to_process.stem.strip()
         results_dict = template_detection_main(
             templates, images, out_dir, pdf_to_process.name
         )
@@ -117,7 +123,7 @@ def run_pipeline(
         )
 
         results = (
-            sig_detector_main(files=files, thresh=thresholds["yes_lower"], debug=True)
+            sig_detector_main(files=files, thresh=thresholds["yes_lower"], debug=DEBUG_MODE)
             or []
         )
 
