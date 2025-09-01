@@ -116,10 +116,7 @@ def run_pipeline(
             json_file_path=json_path, include_map=include_map
         )
 
-        results = (
-            sig_detector_main(files=files, thresh=thresholds["yes_lower"], debug=True)
-            or []
-        )
+        results = sig_detector_main(files=files, debug=True) or []
 
         for r in results:
             all_rows.append(
