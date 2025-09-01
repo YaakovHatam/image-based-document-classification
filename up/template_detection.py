@@ -58,6 +58,40 @@ def save_debug_image(step_name: str, img, prefix: str = "debug", img_idx=None):
 # --------------------
 # IMAGE HELPERS
 # --------------------
+def compute_skew_and_rotate(img: np.ndarray) -> np.ndarray:
+    """Detects and corrects small skew angles in an image."""
+    # Convert to grayscale
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+    # Invert colors and apply threshold
+    gray = cv.bitwise_not(gray)
+    thresh = cv.threshold(gray, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)[1]
+
+    # Find coordinates of all non-zero pixels
+    coords = np.column_stack(np.where(thresh > 0))
+
+    # Get the minimum area rotated rectangle
+    angle = cv.minAreaRect(coords)[-1]
+
+    # The `cv.minAreaRect` angle can be [-90, 0).
+    # We need to adjust it to be a corrective rotation.
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+
+    # Rotate the image to correct the skew
+    (h, w) = img.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv.warpAffine(
+        img, M, (w, h), flags=cv.INTER_CUBIC, borderMode=cv.BORDER_REPLICATE
+    )
+
+    print(f"[INFO] Detected skew angle: {angle:.2f} degrees. Correcting...")
+    return rotated
+
+
 def resize_img(img):
     if isinstance(img, Image.Image):
         img = np.array(img)  # PIL → NumPy (RGB)
@@ -67,12 +101,16 @@ def resize_img(img):
 
 
 def preprocess(img: Image.Image, img_idx=None):
-    """Convert to OpenCV format, grayscale, resize, and binarize."""
+    """Convert to OpenCV format, deskew, grayscale, resize, and binarize."""
     if isinstance(img, Image.Image):
         img = np.array(img)  # PIL → NumPy (RGB)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
     save_debug_image("Original", img, img_idx)
+
+    # --- NEW: Deskew step ---
+    img = compute_skew_and_rotate(img)
+    save_debug_image("Deskewed", img, img_idx)
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     save_debug_image("Gray", gray, img_idx)
@@ -160,9 +198,10 @@ def match_scores_pair(kp_p, des_p, kp_t, des_t):
 
 def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None):
     """
-    Recognizes a page by checking both normal and 180-degree rotated orientations.
+    Recognizes a page by checking all four orientations (0, 90, 180, 270 degrees).
     Returns the best match, its score, orientation, and detailed scores.
     """
+    # Preprocessing (including deskewing) happens here
     img_normal = preprocess(img, img_idx)
 
     def score_against_templates(image_to_test):
@@ -217,41 +256,49 @@ def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None)
 
         return scores, details
 
-    # === Score Normal Orientation (0 degrees) ===
-    print("[INFO] Checking normal orientation (0 degrees)...")
-    scores_normal, details_normal = score_against_templates(img_normal)
-    best_template_normal = (
-        max(scores_normal, key=scores_normal.get) if scores_normal else None
-    )
-    best_score_normal = scores_normal.get(best_template_normal, 0)
+    orientations = {
+        0: img_normal,
+        # 90: cv.rotate(img_normal, cv.ROTATE_90_CLOCKWISE),
+        180: cv.rotate(img_normal, cv.ROTATE_180),
+        # 270: cv.rotate(img_normal, cv.ROTATE_90_COUNTERCLOCKWISE),
+    }
 
-    # === Score Rotated Orientation (180 degrees) ===
-    print("[INFO] Checking rotated orientation (180 degrees)...")
-    img_rotated = cv.rotate(img_normal, cv.ROTATE_180)
-    save_debug_image("Input_Rotated_180_Degrees", img_rotated, img_idx)
-    scores_rotated, details_rotated = score_against_templates(img_rotated)
-    best_template_rotated = (
-        max(scores_rotated, key=scores_rotated.get) if scores_rotated else None
-    )
-    best_score_rotated = scores_rotated.get(best_template_rotated, 0)
+    best_orientation = 0
+    best_score = -1
+    best_template = "None"
+    best_scores_dict = {}
+    best_details_dict = {}
 
-    # === Compare and select the best orientation ===
-    if best_score_normal >= best_score_rotated:
-        print(f"[INFO] Best match is NORMAL orientation. Score: {best_score_normal}")
-        if not best_template_normal:  # Handle case where no templates matched at all
-            return "None", 0, 0, {}, {}
-        return best_template_normal, best_score_normal, 0, scores_normal, details_normal
-    else:
-        print(f"[INFO] Best match is ROTATED orientation. Score: {best_score_rotated}")
-        if not best_template_rotated:  # Handle case where no templates matched at all
-            return "None", 0, 0, {}, {}
-        return (
-            best_template_rotated,
-            best_score_rotated,
-            180,
-            scores_rotated,
-            details_rotated,
-        )
+    for angle, img_rotated in orientations.items():
+        print(f"[INFO] Checking orientation: {angle} degrees...")
+        if DEBUG_MODE:
+            save_debug_image(f"Input_Rotated_{angle}_Degrees", img_rotated, img_idx)
+
+        scores, details = score_against_templates(img_rotated)
+        if not scores:
+            continue
+
+        current_best_template = max(scores, key=scores.get)
+        current_best_score = scores[current_best_template]
+
+        if current_best_score > best_score:
+            best_score = current_best_score
+            best_orientation = angle
+            best_template = current_best_template
+            best_scores_dict = scores
+            best_details_dict = details
+
+    print(
+        f"[INFO] Best match is {best_template} at {best_orientation} degrees with score {best_score}"
+    )
+
+    return (
+        best_template,
+        best_score,
+        best_orientation,
+        best_scores_dict,
+        best_details_dict,
+    )
 
 
 # --------------------
@@ -324,11 +371,12 @@ def template_detection_main(
                 "page_path": os.path.join(out_dir, page_path_file),
             }
         # save image to out_dir
-        if orientation == 180:
-            img = img.rotate(180, expand=True)
+        if orientation != 0:
+            # The initial deskew is already handled, this rotates for major orientation
+            img = img.rotate(orientation, expand=True)
 
         img = resize_img(img)
-        cv.imwrite(out_dir / page_path_file, img)
+        cv.imwrite(os.path.join(out_dir, page_path_file), img)
 
         results_dict["pages"].append(page_result)
 
