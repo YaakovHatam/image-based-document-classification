@@ -217,49 +217,41 @@ def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None)
 
         return scores, details
 
-    orientations = {
-        0: img_normal,
-        # 90: cv.rotate(img_normal, cv.ROTATE_90_CLOCKWISE),
-        180: cv.rotate(img_normal, cv.ROTATE_180),
-        # 270: cv.rotate(img_normal, cv.ROTATE_90_COUNTERCLOCKWISE),
-    }
-
-    best_orientation = 0
-    best_score = -1
-    best_template = "None"
-    best_scores_dict = {}
-    best_details_dict = {}
-
-    for angle, img_rotated in orientations.items():
-        print(f"[INFO] Checking orientation: {angle} degrees...")
-        if DEBUG_MODE:
-            save_debug_image(f"Input_Rotated_{angle}_Degrees", img_rotated, img_idx)
-
-        scores, details = score_against_templates(img_rotated)
-        if not scores:
-            continue
-
-        current_best_template = max(scores, key=scores.get)
-        current_best_score = scores[current_best_template]
-
-        if current_best_score > best_score:
-            best_score = current_best_score
-            best_orientation = angle
-            best_template = current_best_template
-            best_scores_dict = scores
-            best_details_dict = details
-
-    print(
-        f"[INFO] Best match is {best_template} at {best_orientation} degrees with score {best_score}"
+    # === Score Normal Orientation (0 degrees) ===
+    print("[INFO] Checking normal orientation (0 degrees)...")
+    scores_normal, details_normal = score_against_templates(img_normal)
+    best_template_normal = (
+        max(scores_normal, key=scores_normal.get) if scores_normal else None
     )
+    best_score_normal = scores_normal.get(best_template_normal, 0)
 
-    return (
-        best_template,
-        best_score,
-        best_orientation,
-        best_scores_dict,
-        best_details_dict,
+    # === Score Rotated Orientation (180 degrees) ===
+    print("[INFO] Checking rotated orientation (180 degrees)...")
+    img_rotated = cv.rotate(img_normal, cv.ROTATE_180)
+    save_debug_image("Input_Rotated_180_Degrees", img_rotated, img_idx)
+    scores_rotated, details_rotated = score_against_templates(img_rotated)
+    best_template_rotated = (
+        max(scores_rotated, key=scores_rotated.get) if scores_rotated else None
     )
+    best_score_rotated = scores_rotated.get(best_template_rotated, 0)
+
+    # === Compare and select the best orientation ===
+    if best_score_normal >= best_score_rotated:
+        print(f"[INFO] Best match is NORMAL orientation. Score: {best_score_normal}")
+        if not best_template_normal:  # Handle case where no templates matched at all
+            return "None", 0, 0, {}, {}
+        return best_template_normal, best_score_normal, 0, scores_normal, details_normal
+    else:
+        print(f"[INFO] Best match is ROTATED orientation. Score: {best_score_rotated}")
+        if not best_template_rotated:  # Handle case where no templates matched at all
+            return "None", 0, 0, {}, {}
+        return (
+            best_template_rotated,
+            best_score_rotated,
+            180,
+            scores_rotated,
+            details_rotated,
+        )
 
 
 # --------------------
