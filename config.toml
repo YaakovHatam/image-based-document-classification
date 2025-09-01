@@ -1,9 +1,19 @@
 [general]
 img_width = 596                 # 596
 img_height = 842                # 842
-header_ratio = 0.25
-footer_ratio = 0.25
 pct_vs_template_treshold = 10.0
+
+[templates]
+# Default values for any template not listed below
+default_header_ratio = 0.25
+default_footer_ratio = 0.25
+
+[templates.settings]
+# Specific overrides can be added here.
+# The key must match the PDF filename in your templates_pdf folder.
+# Example: For "134.pdf", the key is "134".
+"134" = { header_ratio = 0.15, footer_ratio = 0.20 }
+"901" = { header_ratio = 0.30, footer_ratio = 0.30 }
 
 [debug]
 mode = true

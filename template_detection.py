@@ -1,3 +1,5 @@
+# up/template_detection.py
+
 import json
 from pathlib import Path
 import cv2 as cv
@@ -20,8 +22,7 @@ with open("config.toml", "rb") as f:
 
     IMG_WIDTH = config["general"]["img_width"]
     IMG_HEIGHT = config["general"]["img_height"]
-    HEADER_RATIO = config["general"]["header_ratio"]
-    FOOTER_RATIO = config["general"]["footer_ratio"]
+    # Ratios are now loaded per-template, so we remove them from here
     PCT_VS_TEMPLATE_TRESHOLD = config["general"]["pct_vs_template_treshold"]
 
     DEBUG_MODE = config["debug"]["mode"]
@@ -60,92 +61,64 @@ def save_debug_image(step_name: str, img, prefix: str = "debug", img_idx=None):
 # --------------------
 def compute_skew_and_rotate(img: np.ndarray) -> np.ndarray:
     """Detects and corrects small skew angles in an image."""
-    # Convert to grayscale
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-
-    # Invert colors and apply threshold
     gray = cv.bitwise_not(gray)
     thresh = cv.threshold(gray, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)[1]
-
-    # Find coordinates of all non-zero pixels
     coords = np.column_stack(np.where(thresh > 0))
-
-    # Get the minimum area rotated rectangle
     angle = cv.minAreaRect(coords)[-1]
-
-    # The `cv.minAreaRect` angle can be [-90, 0).
-    # We need to adjust it to be a corrective rotation.
     if angle < -45:
         angle = -(90 + angle)
     else:
         angle = -angle
-
-    # Rotate the image to correct the skew
     (h, w) = img.shape[:2]
     center = (w // 2, h // 2)
     M = cv.getRotationMatrix2D(center, angle, 1.0)
     rotated = cv.warpAffine(
         img, M, (w, h), flags=cv.INTER_CUBIC, borderMode=cv.BORDER_REPLICATE
     )
-
     print(f"[INFO] Detected skew angle: {angle:.2f} degrees. Correcting...")
     return rotated
 
 
 def resize_img(img):
     if isinstance(img, Image.Image):
-        img = np.array(img)  # PIL → NumPy (RGB)
+        img = np.array(img)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
-
     return cv.resize(img, (IMG_WIDTH, IMG_HEIGHT))
 
 
 def preprocess(img: Image.Image, img_idx=None):
     """Convert to OpenCV format, deskew, grayscale, resize, and binarize."""
     if isinstance(img, Image.Image):
-        img = np.array(img)  # PIL → NumPy (RGB)
+        img = np.array(img)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
-
     save_debug_image("Original", img, img_idx)
-
-    # --- NEW: Deskew step ---
     img = compute_skew_and_rotate(img)
     save_debug_image("Deskewed", img, img_idx)
-
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     save_debug_image("Gray", gray, img_idx)
-
     gray = cv.resize(gray, (IMG_WIDTH, IMG_HEIGHT))
     save_debug_image("Resized", gray, img_idx)
-
     gray = cv.GaussianBlur(gray, (3, 3), 0)
     save_debug_image("Blurred", gray, img_idx)
-
     bin_img = cv.adaptiveThreshold(
         gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 15, 10
     )
     save_debug_image("Binarized", bin_img, img_idx)
-
     return bin_img
 
 
-def get_header_footer(img):
-    """Extract header and footer regions."""
+def get_header_footer(img, header_ratio, footer_ratio):
+    """Extract header and footer regions using provided ratios."""
     h = img.shape[0]
-    header = img[0 : int(h * HEADER_RATIO), :]
-    footer = img[int(h * (1 - FOOTER_RATIO)) :, :]
-
+    header = img[0 : int(h * header_ratio), :]
+    footer = img[int(h * (1 - footer_ratio)) :, :]
     save_debug_image("Header", header)
     save_debug_image("Footer", footer)
-
     return header, footer
 
 
-# --- Inserted helpers ---
 def geometric_inliers(kp_t, kp_p, good_matches, ransac_thresh=3.0):
-    """
-    Compute number of geometric inliers using RANSAC homography between template (kp_t) and page (kp_p).
-    """
     if len(good_matches) < 4:
         return 0
     src = np.float32([kp_t[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
@@ -155,17 +128,12 @@ def geometric_inliers(kp_t, kp_p, good_matches, ransac_thresh=3.0):
 
 
 def knn_ratio_matches(des_t, des_p, ratio=0.75):
-    """
-    Return list of 'good' matches using Lowe's ratio test (template -> page).
-    """
     if des_t is None or des_p is None:
         return []
-    # bf.knnMatch can throw an error if descriptors are empty
     try:
         knn = bf.knnMatch(des_t, des_p, k=2)
     except cv.error:
         return []
-
     good = []
     for pair in knn:
         if len(pair) == 2:
@@ -176,7 +144,6 @@ def knn_ratio_matches(des_t, des_p, ratio=0.75):
 
 
 def extract_features(img):
-    """Extract ORB features (keypoints + descriptors)."""
     kp, des = akaze.detectAndCompute(img, None)
     return kp, des
 
@@ -187,36 +154,34 @@ def extract_features(img):
 
 
 def match_scores_pair(kp_p, des_p, kp_t, des_t):
-    """
-    Compute raw good-match count and geometric inliers between a page region and a template region.
-    Returns (raw_good, inliers).
-    """
     good = knn_ratio_matches(des_t, des_p, ratio=0.75)
     inliers = geometric_inliers(kp_t, kp_p, good, ransac_thresh=3.0)
     return len(good), inliers
 
 
 def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None):
-    """
-    Recognizes a page by checking all four orientations (0, 90, 180, 270 degrees).
-    Returns the best match, its score, orientation, and detailed scores.
-    """
-    # Preprocessing (including deskewing) happens here
     img_normal = preprocess(img, img_idx)
 
     def score_against_templates(image_to_test):
-        header, footer = get_header_footer(image_to_test)
-
-        kp_h_p, des_h_p = extract_features(header)
-        kp_f_p, des_f_p = extract_features(footer)
-        page_kpts_total = len(kp_h_p or []) + len(kp_f_p or [])
-
         scores = {}
         details = {}
-        if not template_db:  # Handle empty template database
+        if not template_db:
             return {}, {}
 
         for template_name, feats in template_db.items():
+            # Use the template-specific ratios to extract header/footer from the page
+            header_ratio = feats["header_ratio"]
+            footer_ratio = feats["footer_ratio"]
+            header_p, footer_p = get_header_footer(
+                image_to_test, header_ratio, footer_ratio
+            )
+
+            # Extract features from the page's header/footer slices
+            kp_h_p, des_h_p = extract_features(header_p)
+            kp_f_p, des_f_p = extract_features(footer_p)
+            page_kpts_total = len(kp_h_p or []) + len(kp_f_p or [])
+
+            # Match page regions against this specific template's stored features
             raw_h, inl_h = match_scores_pair(
                 kp_h_p, des_h_p, feats["header"]["kp"], feats["header"]["des"]
             )
@@ -245,7 +210,7 @@ def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None)
                 "pct_dice": float(pct_dice),
             }
 
-        if not details:  # Handle no templates matched
+        if not details:
             return {}, {}
 
         best_inliers = max(v["inliers_total"] for v in details.values())
@@ -258,16 +223,12 @@ def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None)
 
     orientations = {
         0: img_normal,
-        # 90: cv.rotate(img_normal, cv.ROTATE_90_CLOCKWISE),
+        90: cv.rotate(img_normal, cv.ROTATE_90_CLOCKWISE),
         180: cv.rotate(img_normal, cv.ROTATE_180),
-        # 270: cv.rotate(img_normal, cv.ROTATE_90_COUNTERCLOCKWISE),
+        270: cv.rotate(img_normal, cv.ROTATE_90_COUNTERCLOCKWISE),
     }
-
-    best_orientation = 0
-    best_score = -1
-    best_template = "None"
-    best_scores_dict = {}
-    best_details_dict = {}
+    best_orientation, best_score, best_template = 0, -1, "None"
+    best_scores_dict, best_details_dict = {}, {}
 
     for angle, img_rotated in orientations.items():
         print(f"[INFO] Checking orientation: {angle} degrees...")
@@ -307,30 +268,29 @@ def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None)
 def template_detection_main(
     templates, images: List[Image.Image], out_dir: Path, source_filename
 ):
-    global DEBUG_OUTPUT_DIR
-    global DEBUG_STEP_COUNTER
-
+    global DEBUG_OUTPUT_DIR, DEBUG_STEP_COUNTER
     os.makedirs(out_dir, exist_ok=True)
     DEBUG_OUTPUT_DIR = out_dir
-
     results_dict = {"source_filename": Path(source_filename).name, "pages": []}
 
     print("\n[INFO] Recognizing test pages:", source_filename)
     for i, img in enumerate(images):
-        DEBUG_STEP_COUNTER = 0  # Reset counter for each page
+        DEBUG_STEP_COUNTER = 0
         (
             best_template,
             best_score,
-            orientation,  # <-- Receive orientation
+            orientation,
             all_scores,
             details,
         ) = recognize_page_with_orientation(img, templates, i)
 
-        if not details:  # Check if any details were returned
+        if not details:
             print(f"[WARNING] No match found for page {i+1}.")
-            sorted_templates = []
-            first_data = {"pct_vs_template": 0, "pct_dice": 0}
-            first_template = "None"
+            sorted_templates, first_data, first_template = (
+                [],
+                {"pct_vs_template": 0, "pct_dice": 0},
+                "None",
+            )
         else:
             sorted_templates = sorted(
                 details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
@@ -351,7 +311,7 @@ def template_detection_main(
                 "file_page_number": i + 1,
                 "predicted_form_type": "None",
                 "predicted_form_page": -1,
-                "rotate": orientation,  # <-- Use detected orientation
+                "rotate": orientation,
                 "pct_vs_template": 0,
                 "pct_dice": 0,
                 "page_path": os.path.join(out_dir, page_path_file),
@@ -365,19 +325,17 @@ def template_detection_main(
                     if "_" in first_template and first_template.split("_")[-1].isdigit()
                     else -1
                 ),
-                "rotate": orientation,  # <-- Use detected orientation
+                "rotate": orientation,
                 "pct_vs_template": first_data["pct_vs_template"],
                 "pct_dice": first_data["pct_dice"],
                 "page_path": os.path.join(out_dir, page_path_file),
             }
-        # save image to out_dir
+
         if orientation != 0:
-            # The initial deskew is already handled, this rotates for major orientation
             img = img.rotate(orientation, expand=True)
 
-        img = resize_img(img)
-        cv.imwrite(os.path.join(out_dir, page_path_file), img)
-
+        img_to_save = resize_img(img)
+        cv.imwrite(os.path.join(out_dir, page_path_file), img_to_save)
         results_dict["pages"].append(page_result)
 
     return results_dict
