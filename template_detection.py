@@ -1,4 +1,3 @@
-DEBUG_STEP_COUNTER = 0
 import json
 from pathlib import Path
 import cv2 as cv
@@ -6,50 +5,35 @@ import os
 import numpy as np
 from PIL import Image
 from typing import List
+import tomllib
 
+DEBUG_STEP_COUNTER = 0
+
+akaze = cv.AKAZE_create()
 # --------------------
 # CONFIG
 # --------------------
-import tomllib
-
-if not os.path.exists("config.toml"):
-    default_config = """
-[general]
-img_width = 800
-img_height = 1000
-header_ratio = 0.2
-footer_ratio = 0.2
-pct_vs_template_treshold = 10.0
-
-[debug]
-mode = true
-output_dir = "debug_output"
-"""
-    with open("config.toml", "w") as f:
-        f.write(default_config)
 
 
 with open("config.toml", "rb") as f:
     config = tomllib.load(f)
 
-IMG_WIDTH = config["general"]["img_width"]
-IMG_HEIGHT = config["general"]["img_height"]
-HEADER_RATIO = config["general"]["header_ratio"]
-FOOTER_RATIO = config["general"]["footer_ratio"]
-PCT_VS_TEMPLATE_TRESHOLD = config["general"]["pct_vs_template_treshold"]
+    IMG_WIDTH = config["general"]["img_width"]
+    IMG_HEIGHT = config["general"]["img_height"]
+    HEADER_RATIO = config["general"]["header_ratio"]
+    FOOTER_RATIO = config["general"]["footer_ratio"]
+    PCT_VS_TEMPLATE_TRESHOLD = config["general"]["pct_vs_template_treshold"]
 
+    DEBUG_MODE = config["debug"]["mode"]
+    DEBUG_OUTPUT_DIR = config["debug"]["output_dir"]
+    DEBUG_STEP_COUNTER = 0
 
-DEBUG_MODE = config["debug"]["mode"]
-DEBUG_OUTPUT_DIR = config["debug"]["output_dir"]
-DEBUG_STEP_COUNTER = 0
-
-## IMPROVEMENT: Switched from ORB to AKAZE for better scale-invariance.
-# AKAZE is generally more robust than ORB for matching images of different sizes.
-akaze = cv.AKAZE_create()
+# ORB parameters
+orb = cv.ORB_create(nfeatures=500)
 bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=False)
 
 
-def save_debug_image(step_name: str, img, prefix: str = "debug"):
+def save_debug_image(step_name: str, img, prefix: str = "debug", img_idx=None):
     """Save a debug image to the debug output directory with incremental step number."""
     global DEBUG_STEP_COUNTER
     if not DEBUG_MODE:
@@ -57,39 +41,52 @@ def save_debug_image(step_name: str, img, prefix: str = "debug"):
 
     os.makedirs(os.path.join(DEBUG_OUTPUT_DIR, "debug"), exist_ok=True)
 
+    # Convert PIL to NumPy if needed
     if isinstance(img, Image.Image):
-        img = np.array(img)
+        img = np.array(img)  # RGB
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
     DEBUG_STEP_COUNTER += 1
+
     filename = f"{DEBUG_STEP_COUNTER:03d}_{prefix}_{step_name}.png"
+    if img_idx is not None:
+        filename = f"img{img_idx}_{DEBUG_STEP_COUNTER:03d}_{prefix}_{step_name}.png"
+
     cv.imwrite(os.path.join(DEBUG_OUTPUT_DIR, "debug", filename), img)
 
 
 # --------------------
 # IMAGE HELPERS
 # --------------------
-def preprocess(img: Image.Image):
-    """Convert to OpenCV format, grayscale, resize, and binarize."""
+def resize_img(img):
     if isinstance(img, Image.Image):
-        img = np.array(img)
+        img = np.array(img)  # PIL → NumPy (RGB)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
-    save_debug_image("Original", img)
+    return cv.resize(img, (IMG_WIDTH, IMG_HEIGHT))
+
+
+def preprocess(img: Image.Image, img_idx=None):
+    """Convert to OpenCV format, grayscale, resize, and binarize."""
+    if isinstance(img, Image.Image):
+        img = np.array(img)  # PIL → NumPy (RGB)
+        img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
+
+    save_debug_image("Original", img, img_idx)
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    save_debug_image("Gray", gray)
+    save_debug_image("Gray", gray, img_idx)
 
     gray = cv.resize(gray, (IMG_WIDTH, IMG_HEIGHT))
-    save_debug_image("Resized", gray)
+    save_debug_image("Resized", gray, img_idx)
 
     gray = cv.GaussianBlur(gray, (3, 3), 0)
-    save_debug_image("Blurred", gray)
+    save_debug_image("Blurred", gray, img_idx)
 
     bin_img = cv.adaptiveThreshold(
         gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 15, 10
     )
-    save_debug_image("Binarized", bin_img)
+    save_debug_image("Binarized", bin_img, img_idx)
 
     return bin_img
 
@@ -106,9 +103,10 @@ def get_header_footer(img):
     return header, footer
 
 
+# --- Inserted helpers ---
 def geometric_inliers(kp_t, kp_p, good_matches, ransac_thresh=3.0):
     """
-    Compute number of geometric inliers using RANSAC homography.
+    Compute number of geometric inliers using RANSAC homography between template (kp_t) and page (kp_p).
     """
     if len(good_matches) < 4:
         return 0
@@ -120,10 +118,11 @@ def geometric_inliers(kp_t, kp_p, good_matches, ransac_thresh=3.0):
 
 def knn_ratio_matches(des_t, des_p, ratio=0.75):
     """
-    Return list of 'good' matches using Lowe's ratio test.
+    Return list of 'good' matches using Lowe's ratio test (template -> page).
     """
     if des_t is None or des_p is None:
         return []
+    # bf.knnMatch can throw an error if descriptors are empty
     try:
         knn = bf.knnMatch(des_t, des_p, k=2)
     except cv.error:
@@ -139,8 +138,7 @@ def knn_ratio_matches(des_t, des_p, ratio=0.75):
 
 
 def extract_features(img):
-    """Extract AKAZE features (keypoints + descriptors)."""
-    ## IMPROVEMENT: Using AKAZE instead of ORB
+    """Extract ORB features (keypoints + descriptors)."""
     kp, des = akaze.detectAndCompute(img, None)
     return kp, des
 
@@ -153,17 +151,19 @@ def extract_features(img):
 def match_scores_pair(kp_p, des_p, kp_t, des_t):
     """
     Compute raw good-match count and geometric inliers between a page region and a template region.
+    Returns (raw_good, inliers).
     """
     good = knn_ratio_matches(des_t, des_p, ratio=0.75)
     inliers = geometric_inliers(kp_t, kp_p, good, ransac_thresh=3.0)
     return len(good), inliers
 
 
-def recognize_page_with_orientation(img: Image.Image, template_db):
+def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None):
     """
     Recognizes a page by checking both normal and 180-degree rotated orientations.
+    Returns the best match, its score, orientation, and detailed scores.
     """
-    img_normal = preprocess(img)
+    img_normal = preprocess(img, img_idx)
 
     def score_against_templates(image_to_test):
         header, footer = get_header_footer(image_to_test)
@@ -174,7 +174,7 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 
         scores = {}
         details = {}
-        if not template_db:
+        if not template_db:  # Handle empty template database
             return {}, {}
 
         for template_name, feats in template_db.items():
@@ -192,15 +192,10 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
             pct_vs_template = (
                 (inl_total / tmpl_kpts_total * 100.0) if tmpl_kpts_total > 0 else 0.0
             )
-
-            ## IMPROVEMENT: The Dice coefficient is a better similarity metric.
-            # It considers the total features on both the template and the page,
-            # making it less biased than a simple inlier count.
             pct_dice = (
                 2.0 * inl_total / max(tmpl_kpts_total + page_kpts_total, 1) * 100.0
             )
 
-            ## IMPROVEMENT: The main score is now the Dice score, not the raw inlier count.
             scores[template_name] = pct_dice
             details[template_name] = {
                 "raw_total": int(raw_total),
@@ -211,7 +206,7 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
                 "pct_dice": float(pct_dice),
             }
 
-        if not details:
+        if not details:  # Handle no templates matched
             return {}, {}
 
         best_inliers = max(v["inliers_total"] for v in details.values())
@@ -222,7 +217,7 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
 
         return scores, details
 
-    # Score Normal Orientation (0 degrees)
+    # === Score Normal Orientation (0 degrees) ===
     print("[INFO] Checking normal orientation (0 degrees)...")
     scores_normal, details_normal = score_against_templates(img_normal)
     best_template_normal = (
@@ -230,26 +225,26 @@ def recognize_page_with_orientation(img: Image.Image, template_db):
     )
     best_score_normal = scores_normal.get(best_template_normal, 0)
 
-    # Score Rotated Orientation (180 degrees)
+    # === Score Rotated Orientation (180 degrees) ===
     print("[INFO] Checking rotated orientation (180 degrees)...")
     img_rotated = cv.rotate(img_normal, cv.ROTATE_180)
-    save_debug_image("Input_Rotated_180_Degrees", img_rotated)
+    save_debug_image("Input_Rotated_180_Degrees", img_rotated, img_idx)
     scores_rotated, details_rotated = score_against_templates(img_rotated)
     best_template_rotated = (
         max(scores_rotated, key=scores_rotated.get) if scores_rotated else None
     )
     best_score_rotated = scores_rotated.get(best_template_rotated, 0)
 
-    # Compare and select the best orientation
+    # === Compare and select the best orientation ===
     if best_score_normal >= best_score_rotated:
         print(f"[INFO] Best match is NORMAL orientation. Score: {best_score_normal}")
-        if not best_template_normal:
+        if not best_template_normal:  # Handle case where no templates matched at all
             return "None", 0, 0, {}, {}
         return best_template_normal, best_score_normal, 0, scores_normal, details_normal
     else:
         print(f"[INFO] Best match is ROTATED orientation. Score: {best_score_rotated}")
-        if not best_template_rotated:
-            return "None", 0, 180, {}, {}
+        if not best_template_rotated:  # Handle case where no templates matched at all
+            return "None", 0, 0, {}, {}
         return (
             best_template_rotated,
             best_score_rotated,
@@ -275,69 +270,65 @@ def template_detection_main(
 
     print("\n[INFO] Recognizing test pages:", source_filename)
     for i, img in enumerate(images):
-        DEBUG_STEP_COUNTER = 0
+        DEBUG_STEP_COUNTER = 0  # Reset counter for each page
         (
             best_template,
             best_score,
-            orientation,
+            orientation,  # <-- Receive orientation
             all_scores,
             details,
-        ) = recognize_page_with_orientation(img, templates)
+        ) = recognize_page_with_orientation(img, templates, i)
 
-        if not details:
+        if not details:  # Check if any details were returned
             print(f"[WARNING] No match found for page {i+1}.")
+            sorted_templates = []
+            first_data = {"pct_vs_template": 0, "pct_dice": 0}
+            first_template = "None"
+        else:
+            sorted_templates = sorted(
+                details.items(), key=lambda x: x[1]["inliers_total"], reverse=True
+            )
+            first_template, first_data = sorted_templates[0]
+
+        if DEBUG_MODE and sorted_templates:
+            with open(out_dir / f"sorted_templates_page_{i+1}.json", "w") as f:
+                json.dump(sorted_templates, f, indent=4)
+
+        page_path_file = f"{Path(source_filename).stem}_page{i+1}_resized.png"
+
+        if (
+            first_template == "None"
+            or first_data["pct_vs_template"] < PCT_VS_TEMPLATE_TRESHOLD
+        ):
             page_result = {
                 "file_page_number": i + 1,
                 "predicted_form_type": "None",
                 "predicted_form_page": -1,
-                "rotate": 0,
+                "rotate": orientation,  # <-- Use detected orientation
                 "pct_vs_template": 0,
                 "pct_dice": 0,
-                "page_path": "",
+                "page_path": os.path.join(out_dir, page_path_file),
             }
         else:
-            sorted_templates = sorted(
-                details.items(), key=lambda x: x[1]["pct_dice"], reverse=True
-            )
+            page_result = {
+                "file_page_number": i + 1,
+                "predicted_form_type": first_template.split("_")[0],
+                "predicted_form_page": (
+                    int(first_template.split("_")[-1])
+                    if "_" in first_template and first_template.split("_")[-1].isdigit()
+                    else -1
+                ),
+                "rotate": orientation,  # <-- Use detected orientation
+                "pct_vs_template": first_data["pct_vs_template"],
+                "pct_dice": first_data["pct_dice"],
+                "page_path": os.path.join(out_dir, page_path_file),
+            }
+        # save image to out_dir
+        if orientation == 180:
+            img = img.rotate(180, expand=True)
 
-            if DEBUG_MODE:
-                with open(out_dir / f"sorted_templates_page_{i+1}.json", "w") as f:
-                    json.dump(sorted_templates, f, indent=4)
-
-            first_template, first_data = sorted_templates[0]
-            page_path_file = f"{Path(source_filename).stem}_page{i+1}.png"
-
-            ## IMPROVEMENT: The decision to classify as "None" is now based on the
-            # best match's score, rather than a global threshold. This is more robust.
-            if first_data["pct_vs_template"] < PCT_VS_TEMPLATE_TRESHOLD:
-                page_result = {
-                    "file_page_number": i + 1,
-                    "predicted_form_type": "None",
-                    "predicted_form_page": -1,
-                    "rotate": orientation,
-                    "pct_vs_template": first_data["pct_vs_template"],
-                    "pct_dice": first_data["pct_dice"],
-                    "page_path": os.path.join(out_dir, page_path_file),
-                }
-            else:
-                page_result = {
-                    "file_page_number": i + 1,
-                    "predicted_form_type": first_template.split("_")[0],
-                    "predicted_form_page": (
-                        int(first_template.split("_")[-1])
-                        if "_" in first_template
-                        and first_template.split("_")[-1].isdigit()
-                        else -1
-                    ),
-                    "rotate": orientation,
-                    "pct_vs_template": first_data["pct_vs_template"],
-                    "pct_dice": first_data["pct_dice"],
-                    "page_path": os.path.join(out_dir, page_path_file),
-                }
-
-            if orientation == 180:
-                img = img.rotate(180, expand=True)
-            img.save(out_dir / page_path_file)
+        img = resize_img(img)
+        cv.imwrite(out_dir / page_path_file, img)
 
         results_dict["pages"].append(page_result)
 

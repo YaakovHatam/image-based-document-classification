@@ -1,0 +1,9 @@
+After run the build script:
+
+1. Copy folder "AutoSignatureDetector" to your pc
+2. Put all your templates inside "tempaltes_pdf" folder
+3. Put all document you want to check in "to_process" folder
+4. Run "AutoSignatureDetector.exe" file
+5. See results in "out" folder (Will be create automatically)
+
+NOTE: You can change the configurations in the config.toml file

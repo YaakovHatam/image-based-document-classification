@@ -17,6 +17,12 @@ from templates_db import build_template_db
 from files_selector import process_page_images_from_json
 
 
+# Read config
+with open("config.toml", "rb") as f:
+    config = tomllib.load(f)
+DEBUG_MODE = config["debug"]["mode"]
+
+
 def _load_include_map_from_toml(toml_path: Path) -> Dict[str, List[int]]:
     if not toml_path.is_file():
         raise FileNotFoundError(
@@ -70,11 +76,23 @@ def run_pipeline(
     splitting_only = _load_splitting_only_flag(config_toml)
 
     # 1) PDFs -> images + template detection
+    pdf_files = sorted(
+        glob(os.path.join(to_process_dir, "**", "*.pdf"), recursive=True)
+    )
+    print(len(pdf_files))
+
     processed_count = 0
-    for path in glob(str(to_process_dir / "*.pdf")):
+    for path in pdf_files:
         pdf_to_process = Path(path)
         images = pdf_to_images(pdf_to_process)
-        out_dir = out_root / pdf_to_process.stem
+
+        # Get the file's path relative to the main processing directory
+        relative_path = pdf_to_process.relative_to(to_process_dir)
+        # Create the new output path by joining the out_root, the relative parent folders, and the filename without its extension
+        out_dir = out_root / relative_path.with_suffix("")
+        # Ensure the new directory is created
+        out_dir.mkdir(parents=True, exist_ok=True)
+
         results_dict = template_detection_main(
             templates, images, out_dir, pdf_to_process.name
         )
@@ -116,7 +134,12 @@ def run_pipeline(
             json_file_path=json_path, include_map=include_map
         )
 
-        results = sig_detector_main(files=files, debug=True) or []
+        results = (
+            sig_detector_main(
+                files=files, thresh=thresholds["yes_lower"], debug=DEBUG_MODE
+            )
+            or []
+        )
 
         for r in results:
             all_rows.append(
@@ -212,4 +235,8 @@ def run_pipeline(
 
 
 if __name__ == "__main__":
-    run_pipeline(Path("to_process"), Path("out"), Path("config.toml"))
+    run_pipeline(
+        Path("//sh/root/sh_FormsDigitizationP/seperate-forms"),
+        Path("out"),
+        Path("config.toml"),
+    )
