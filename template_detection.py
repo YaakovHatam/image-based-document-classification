@@ -65,6 +65,8 @@ def compute_skew_and_rotate(img: np.ndarray) -> np.ndarray:
     gray = cv.bitwise_not(gray)
     thresh = cv.threshold(gray, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)[1]
     coords = np.column_stack(np.where(thresh > 0))
+    if coords.size == 0:
+        return img
     angle = cv.minAreaRect(coords)[-1]
     if angle < -45:
         angle = -(90 + angle)
@@ -80,6 +82,13 @@ def compute_skew_and_rotate(img: np.ndarray) -> np.ndarray:
     return rotated
 
 
+def remove_color_noise(img: np.ndarray) -> np.ndarray:
+    """Reduce color noise present in scanned documents."""
+    if img.ndim == 3:
+        return cv.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
+    return img
+
+
 def resize_img(img):
     if isinstance(img, Image.Image):
         img = np.array(img)
@@ -88,11 +97,13 @@ def resize_img(img):
 
 
 def preprocess(img: Image.Image, img_idx=None):
-    """Convert to OpenCV format, deskew, grayscale, resize, and binarize."""
+    """Convert to OpenCV format, deskew, denoise, grayscale and binarize."""
     if isinstance(img, Image.Image):
         img = np.array(img)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
     save_debug_image("Original", img, img_idx)
+    img = remove_color_noise(img)
+    save_debug_image("Denoised", img, img_idx)
     img = compute_skew_and_rotate(img)
     save_debug_image("Deskewed", img, img_idx)
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
@@ -104,6 +115,8 @@ def preprocess(img: Image.Image, img_idx=None):
     bin_img = cv.adaptiveThreshold(
         gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 15, 10
     )
+    kernel = np.ones((3, 3), np.uint8)
+    bin_img = cv.morphologyEx(bin_img, cv.MORPH_OPEN, kernel, iterations=1)
     save_debug_image("Binarized", bin_img, img_idx)
     return bin_img
 
