@@ -58,6 +58,40 @@ def save_debug_image(step_name: str, img, prefix: str = "debug", img_idx=None):
 # --------------------
 # IMAGE HELPERS
 # --------------------
+def compute_skew_and_rotate(img: np.ndarray) -> np.ndarray:
+    """Detects and corrects small skew angles in an image."""
+    # Convert to grayscale
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+    # Invert colors and apply threshold
+    gray = cv.bitwise_not(gray)
+    thresh = cv.threshold(gray, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)[1]
+
+    # Find coordinates of all non-zero pixels
+    coords = np.column_stack(np.where(thresh > 0))
+
+    # Get the minimum area rotated rectangle
+    angle = cv.minAreaRect(coords)[-1]
+
+    # The `cv.minAreaRect` angle can be [-90, 0).
+    # We need to adjust it to be a corrective rotation.
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+
+    # Rotate the image to correct the skew
+    (h, w) = img.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv.warpAffine(
+        img, M, (w, h), flags=cv.INTER_CUBIC, borderMode=cv.BORDER_REPLICATE
+    )
+
+    print(f"[INFO] Detected skew angle: {angle:.2f} degrees. Correcting...")
+    return rotated
+
+
 def resize_img(img):
     if isinstance(img, Image.Image):
         img = np.array(img)  # PIL → NumPy (RGB)
@@ -67,12 +101,16 @@ def resize_img(img):
 
 
 def preprocess(img: Image.Image, img_idx=None):
-    """Convert to OpenCV format, grayscale, resize, and binarize."""
+    """Convert to OpenCV format, deskew, grayscale, resize, and binarize."""
     if isinstance(img, Image.Image):
         img = np.array(img)  # PIL → NumPy (RGB)
         img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
 
     save_debug_image("Original", img, img_idx)
+
+    # --- NEW: Deskew step ---
+    img = compute_skew_and_rotate(img)
+    save_debug_image("Deskewed", img, img_idx)
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     save_debug_image("Gray", gray, img_idx)
@@ -160,9 +198,10 @@ def match_scores_pair(kp_p, des_p, kp_t, des_t):
 
 def recognize_page_with_orientation(img: Image.Image, template_db, img_idx=None):
     """
-    Recognizes a page by checking both normal and 180-degree rotated orientations.
+    Recognizes a page by checking all four orientations (0, 90, 180, 270 degrees).
     Returns the best match, its score, orientation, and detailed scores.
     """
+    # Preprocessing (including deskewing) happens here
     img_normal = preprocess(img, img_idx)
 
     def score_against_templates(image_to_test):
@@ -332,11 +371,12 @@ def template_detection_main(
                 "page_path": os.path.join(out_dir, page_path_file),
             }
         # save image to out_dir
-        if orientation == 180:
-            img = img.rotate(180, expand=True)
+        if orientation != 0:
+            # The initial deskew is already handled, this rotates for major orientation
+            img = img.rotate(orientation, expand=True)
 
         img = resize_img(img)
-        cv.imwrite(out_dir / page_path_file, img)
+        cv.imwrite(os.path.join(out_dir, page_path_file), img)
 
         results_dict["pages"].append(page_result)
 
